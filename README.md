@@ -6,7 +6,10 @@ machine × filament et journal d'impression.
 
 ## Lancer
 
-    ./lancer.sh            # http://<ip-du-pc>:8030 depuis n'importe quel poste du réseau
+    ./lancer.sh            # Linux / macOS
+    lancer.bat             # Windows (double-clic possible)
+
+Puis http://<ip-du-pc>:8030 depuis n'importe quel poste du réseau. Python 3 doit être installé.
 
 Les données (base SQLite + fichiers + miniatures) sont dans `data/`. Sauvegarde : lien en bas du menu.
 
