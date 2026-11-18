@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Atelier 3D</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script type="importmap">
+    { "imports": { "three": "/static/vendor/three/three.module.js", "three/addons/": "/static/vendor/three/addons/" } }
+  </script>
+</head>
+<body>
+  <div class="app">
+    <nav class="cote">
+      <div class="marque"><span class="logo">3D</span> Atelier 3D</div>
+      <a href="#/" data-route="">Tableau de bord</a>
+      <a href="#/projets" data-route="projets">Projets</a>
+      <a href="#/machines" data-route="machines">Machines</a>
+      <a href="#/filaments" data-route="filaments">Filaments</a>
+      <a href="#/presets" data-route="presets">Presets</a>
+      <a href="#/impressions" data-route="impressions">Journal d'impression</a>
+      <div class="pied"><a href="/api/sauvegarde">Télécharger une sauvegarde</a></div>
+    </nav>
+    <main id="page"></main>
+  </div>
+  <dialog id="modale"></dialog>
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>
