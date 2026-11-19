@@ -23,6 +23,7 @@ DONNEES = Path(os.environ.get("ATELIER3D_DONNEES", ICI.parent / "data"))
 FICHIERS = DONNEES / "fichiers"
 MINIATURES = DONNEES / "miniatures"
 PHOTOS_MACHINES = DONNEES / "machines"   # photo de chaque imprimante (facultative) : <machine_id>.<ext>
+IMAGES_MODELES = DONNEES / "modeles"     # image d'un modèle, pour toutes ses machines : <marque-modele>.<ext>
 PLANS = DONNEES / "plans"          # plans générés par le navigateur, gardés : <fichier_id>.json
 
 db = Base(DONNEES / "atelier.db")
@@ -103,8 +104,25 @@ def _masquer(m):
     m = dict(m)
     m["code_acces_renseigne"] = bool(m.pop("code_acces", ""))
     photo = _photo_machine(m["id"])
-    m["photo"] = f"/api/machines/{m['id']}/photo?v={int(photo.stat().st_mtime)}" if photo else None
+    cle = cle_modele(m.get("marque"), m.get("modele"))
+    image = _image_modele(cle) if cle else None
+    m["photo_propre"] = bool(photo)
+    m["cle_modele"] = cle
+    m["photo"] = (f"/api/machines/{m['id']}/photo?v={int(photo.stat().st_mtime)}" if photo
+                  else f"/api/modeles/{cle}/image?v={int(image.stat().st_mtime)}" if image else None)
     return m
+
+
+def cle_modele(marque, modele):
+    """« Bambu Lab » + « A1 mini » → « bambu-lab-a1-mini » (vide si le modèle n'est pas renseigné)."""
+    if not (modele or "").strip():
+        return ""
+    return re.sub(r"[^a-z0-9]+", "-", f"{marque or ''} {modele}".lower()).strip("-")
+
+
+def _image_modele(cle):
+    return next((p for p in IMAGES_MODELES.glob(f"{cle}.*") if p.suffix in FORMATS_PHOTO), None) \
+        if IMAGES_MODELES.exists() and re.fullmatch(r"[a-z0-9-]+", cle or "") else None
 
 
 FORMATS_PHOTO = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
@@ -204,16 +222,11 @@ def photo_machine(ident: int):
 async def deposer_photo_machine(ident: int, photo: UploadFile = File(...)):
     """Photo de l'imprimante (remplace le dessin) : JPEG, PNG ou WebP, 8 Mo au plus."""
     _existe("machines", ident)
-    ext = Path(photo.filename or "").suffix.lower()
-    if ext not in FORMATS_PHOTO:
-        raise HTTPException(400, "photo attendue : JPEG, PNG ou WebP")
-    contenu = await photo.read()
-    if len(contenu) > 8_000_000:
-        raise HTTPException(400, "photo trop lourde (8 Mo au plus)")
+    ext = _lire_image(photo, contenu := await photo.read())
     PHOTOS_MACHINES.mkdir(parents=True, exist_ok=True)
     if ancienne := _photo_machine(ident):
         ancienne.unlink()
-    (PHOTOS_MACHINES / f"{ident}{'.jpg' if ext == '.jpeg' else ext}").write_bytes(contenu)
+    (PHOTOS_MACHINES / f"{ident}{ext}").write_bytes(contenu)
     return _masquer(_existe("machines", ident))
 
 
@@ -223,6 +236,44 @@ def supprimer_photo_machine(ident: int):
     if p := _photo_machine(ident):
         p.unlink()
     return _masquer(_existe("machines", ident))
+
+
+def _lire_image(photo: UploadFile, contenu: bytes):
+    ext = Path(photo.filename or "").suffix.lower()
+    if ext not in FORMATS_PHOTO:
+        raise HTTPException(400, "image attendue : JPEG, PNG ou WebP")
+    if len(contenu) > 8_000_000:
+        raise HTTPException(400, "image trop lourde (8 Mo au plus)")
+    return ".jpg" if ext == ".jpeg" else ext
+
+
+@app.get("/api/modeles/{cle}/image")
+def image_modele(cle: str):
+    p = _image_modele(cle)
+    if not p:
+        raise HTTPException(404, "pas d'image pour ce modèle")
+    return FileResponse(p, media_type=FORMATS_PHOTO[p.suffix])
+
+
+@app.put("/api/modeles/{cle}/image")
+async def deposer_image_modele(cle: str, photo: UploadFile = File(...)):
+    """Image d'un modèle d'imprimante (de préférence sur fond transparent), montrée pour toutes ses machines
+    qui n'ont pas leur propre photo."""
+    if not re.fullmatch(r"[a-z0-9-]+", cle):
+        raise HTTPException(400, "modèle invalide")
+    ext = _lire_image(photo, contenu := await photo.read())
+    IMAGES_MODELES.mkdir(parents=True, exist_ok=True)
+    if ancienne := _image_modele(cle):
+        ancienne.unlink()
+    (IMAGES_MODELES / f"{cle}{ext}").write_bytes(contenu)
+    return {"ok": True}
+
+
+@app.delete("/api/modeles/{cle}/image")
+def supprimer_image_modele(cle: str):
+    if p := _image_modele(cle):
+        p.unlink()
+    return {"ok": True}
 
 
 @app.post("/api/impressions/{ident}/lancer")

@@ -256,3 +256,24 @@ def test_photo_machine(client):
     client.put(f"/api/machines/{m['id']}/photo", files={"photo": ("kobra.png", png_uni(), "image/png")})
     client.delete(f"/api/machines/{m['id']}")
     assert not list(client.module.PHOTOS_MACHINES.glob(f"{m['id']}.*")), "photo effacée avec la machine"
+
+
+def test_image_du_modele(client):
+    """Image d'un modèle : montrée pour toutes ses machines sans photo propre ; la photo propre passe avant."""
+    a = client.post("/api/machines", json={"nom": "A", "marque": "Bambu Lab", "modele": "A1"}).json()
+    b = client.post("/api/machines", json={"nom": "B", "marque": "Bambu Lab", "modele": "A1"}).json()
+    mini = client.post("/api/machines", json={"nom": "C", "marque": "Bambu Lab", "modele": "A1 mini"}).json()
+    assert a["cle_modele"] == "bambu-lab-a1" and mini["cle_modele"] == "bambu-lab-a1-mini"
+    assert client.put("/api/modeles/bambu-lab-a1/image", files={"photo": ("a1.png", png_uni(), "image/png")}).json()["ok"]
+    for m in (a, b):
+        assert client.get(f"/api/machines/{m['id']}").json()["photo"].startswith("/api/modeles/bambu-lab-a1/image")
+    assert client.get(f"/api/machines/{mini['id']}").json()["photo"] is None, "l'A1 mini n'est pas une A1"
+    assert client.get("/api/modeles/bambu-lab-a1/image").content == png_uni()
+    client.put(f"/api/machines/{b['id']}/photo", files={"photo": ("b.png", png_uni((0, 255, 0)), "image/png")})
+    b = client.get(f"/api/machines/{b['id']}").json()
+    assert b["photo"].startswith(f"/api/machines/{b['id']}/photo") and b["photo_propre"]
+    assert client.put("/api/modeles/../x/image", files={"photo": ("a.png", png_uni(), "image/png")}).status_code in (400, 404)
+    assert client.put("/api/modeles/Bambu%20A1/image", files={"photo": ("a.png", png_uni(), "image/png")}).status_code == 400
+    client.delete("/api/modeles/bambu-lab-a1/image")
+    assert client.get(f"/api/machines/{a['id']}").json()["photo"] is None
+    assert client.get("/api/machines/" + str(client.post("/api/machines", json={"nom": "sans modèle"}).json()["id"])).json()["cle_modele"] == ""

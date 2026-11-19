@@ -4,12 +4,12 @@
 
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-// forme : porte_a_faux (un seul montant, bras en console) | portique (deux montants) | caisson (fermée) | cadre (cube ouvert)
+// forme : porte_a_faux (un seul montant, bras en console : A1 mini) | portique (deux montants) | caisson (fermée) | cadre (cube ouvert)
 export function forme(m) {
   const t = `${m.marque || ""} ${m.modele || ""} ${m.nom || ""}`.toLowerCase();
   if (/\b(p1s|x1|x1c|x1e|x1 carbon|h2d|kobra s1|k1 max|k1c|k2|bambu x)\b/.test(t)) return "caisson";
   if (/\bp1p\b|voron|\bk1\b/.test(t)) return "cadre";
-  if (/\ba1\b|a1 mini|a1mini/.test(t)) return "porte_a_faux";
+  if (/\ba1 ?mini\b/.test(t)) return "porte_a_faux";   // l'A1 (sans « mini ») a deux montants : portique
   return "portique";
 }
 

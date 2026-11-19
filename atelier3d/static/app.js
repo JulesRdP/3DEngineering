@@ -318,7 +318,7 @@ const etatDe = (m, e = {}) => e.etat || e.connexion || "inconnu";
 
 function carteMachine(m, e = {}, imp = null) {
   return `<a class="carte-imp" href="#/machine/${m.id}" data-machine="${m.id}">
-    <div class="vignette">${vignetteMachine(m, e)}</div>
+    <div class="vignette${m.photo ? " avec-photo" : ""}">${vignetteMachine(m, e)}</div>
     <div class="corps">${corpsCarteMachine(m, e, imp)}</div></a>`;
 }
 const vignetteMachine = (m, e = {}) => `${imageMachine(m, e)}<span class="pastille ${ETATS_MACHINE[etatDe(m, e)] || "p-neutre"}">${esc(libelleEtat(etatDe(m, e)))}</span>`;
@@ -956,15 +956,16 @@ pages.machine = async (params, id) => {
   page.innerHTML = `
     <div class="fil"><a href="#/machines">Machines</a> /</div>
     <div class="tete-imp">
-      <div class="grande-vignette" id="vignette"></div>
+      <div class="grande-vignette${m.photo ? " avec-photo" : ""}" id="vignette"></div>
       <div class="tete-imp-texte">
         <h1>${esc(m.nom)}</h1>
         <div class="sous">${esc([m.marque, m.modele].filter(Boolean).join(" ") || "Modèle non renseigné")} · ${esc(volumeTexte(m))} · buse ${nb(m.buse, 2)} mm</div>
         <div id="etat-tete" style="margin-top:10px"></div>
         <div class="actions" style="margin-top:14px">
           <button class="btn" id="modif">Modifier</button>
-          <button class="btn" id="photo">${m.photo ? "Changer la photo" : "Ajouter une photo"}</button>
-          ${m.photo ? `<button class="btn" id="sans-photo">Revenir au dessin</button>` : ""}
+          ${m.cle_modele ? `<button class="btn" id="image-modele" title="Montrée pour toutes les ${esc(m.modele)} qui n'ont pas leur propre photo">Image du modèle ${esc(m.modele)}</button>` : ""}
+          <button class="btn" id="photo">${m.photo_propre ? "Changer la photo de cette machine" : "Photo de cette machine"}</button>
+          ${m.photo_propre ? `<button class="btn" id="sans-photo">Retirer sa photo</button>` : ""}
         </div>
       </div>
     </div>
@@ -1005,16 +1006,18 @@ pages.machine = async (params, id) => {
   minuterie = setInterval(async () => rendre((await api("etat-machines"))[m.id]), 3000);
 
   $("#modif").onclick = () => editer("machines", champsMachine(), m, (r) => (r ? route() : (location.hash = "#/machines")));
-  $("#photo").onclick = () => {
+  const choisirImage = (chemin, message) => {
     const entree = Object.assign(document.createElement("input"), { type: "file", accept: "image/jpeg,image/png,image/webp" });
     entree.onchange = async () => {
       const fd = new FormData();
       fd.append("photo", entree.files[0]);
-      try { await api(`machines/${m.id}/photo`, { method: "PUT", body: fd }); toast("Photo enregistrée"); route(); }
+      try { await api(chemin, { method: "PUT", body: fd }); toast(message); route(); }
       catch (e) { toast("Erreur : " + e.message); }
     };
     entree.click();
   };
+  $("#photo").onclick = () => choisirImage(`machines/${m.id}/photo`, "Photo enregistrée");
+  $("#image-modele")?.addEventListener("click", () => choisirImage(`modeles/${m.cle_modele}/image`, `Image enregistrée pour toutes les ${m.modele}`));
   $("#sans-photo")?.addEventListener("click", async () => { await api(`machines/${m.id}/photo`, { method: "DELETE" }); route(); });
   $("#direct").onclick = async (ev) => {
     const b = ev.target.closest("[data-statut]");
