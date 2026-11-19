@@ -174,7 +174,7 @@ const champsProjet = () => [
   { k: "lien_cao", l: "Lien CAO", ph: "https://cad.onshape.com/..." },
   { k: "description", l: "Description", t: "textarea", large: true },
 ];
-const champsMachine = () => [
+const champsMachine = (m = null) => [
   { k: "__modele", l: "Modèle connu (pré-remplit)", t: "select", options: [["", "—"], ...Object.keys(MODELES_MACHINE).map((m) => [m, m])] },
   { k: "nom", l: "Nom", requis: true, ph: "P1S du labo" },
   { k: "marque", l: "Marque" }, { k: "modele", l: "Modèle" },
@@ -187,6 +187,10 @@ const champsMachine = () => [
   { k: "code_acces", l: "Code d'accès", t: "password", aide: "Bambu : écran > Réseau > Code d'accès. Vide = inchangé" },
   { k: "statut_manuel", l: "État manuel", t: "select", options: [["libre", "Libre"], ["occupee", "Occupée"], ["maintenance", "Maintenance"], ["hors_service", "Hors service"]] },
   { k: "notes", l: "Notes", t: "textarea", large: true },
+  { k: "__photo", l: m?.photo_propre ? "Remplacer la photo de cette machine" : "Photo de cette machine", t: "fichiers", accept: "image/jpeg,image/png,image/webp",
+    aide: "facultatif : remplace l'image du modèle pour cette machine" },
+  { k: "__image_modele", l: "Image du modèle", t: "fichiers", accept: "image/jpeg,image/png,image/webp", aide: "pour toutes les machines de ce modèle (PNG sans fond de préférence)" },
+  ...(m?.photo_propre ? [{ k: "__retirer_photo", l: "Photo de cette machine", t: "select", options: [["", "La garder"], ["oui", "La retirer"]] }] : []),
 ];
 const champsFilament = () => [
   { k: "matiere", l: "Matière", requis: true, liste: Object.keys(MATIERES), defaut: "PLA" },
@@ -269,10 +273,23 @@ async function editer(table, champs, ligne, apres) {
       return apres?.(null);
     }
     delete r.__modele;
-    const res = ligne?.id ? await api(`${table}/${ligne.id}`, { method: "PUT", body: r }) : await api(table, { method: "POST", body: r });
+    const images = { photo: r.__photo?.[0], modele: r.__image_modele?.[0], retirer: r.__retirer_photo === "oui" };
+    for (const k of Object.keys(r)) if (k.startsWith("__")) delete r[k];
+    let res = ligne?.id ? await api(`${table}/${ligne.id}`, { method: "PUT", body: r }) : await api(table, { method: "POST", body: r });
+    if (table === "machines") res = await envoyerImagesMachine(res, images);
     toast("Enregistré");
     apres?.(res);
   } catch (e) { toast("Erreur : " + e.message); }
+}
+
+// Photo d'une machine et image de son modèle, choisies dans « Modifier la machine ».
+async function envoyerImagesMachine(m, { photo, modele, retirer }) {
+  const envoyer = (chemin, fichier) => { const fd = new FormData(); fd.append("photo", fichier); return api(chemin, { method: "PUT", body: fd }); };
+  if (retirer) await api(`machines/${m.id}/photo`, { method: "DELETE" });
+  if (photo) await envoyer(`machines/${m.id}/photo`, photo);
+  if (modele && m.cle_modele) await envoyer(`modeles/${m.cle_modele}/image`, modele);
+  if (modele && !m.cle_modele) toast("Image du modèle ignorée : renseigne d'abord la marque et le modèle");
+  return photo || modele || retirer ? api("machines/" + m.id) : m;
 }
 
 // ------------------------------------------------------------------ pages
@@ -958,23 +975,23 @@ pages.machine = async (params, id) => {
         <h1>${esc(m.nom)}</h1>
         <div class="sous">${esc([m.marque, m.modele].filter(Boolean).join(" ") || "Modèle non renseigné")} · ${esc(volumeTexte(m))} · buse ${nb(m.buse, 2)} mm</div>
         <div id="etat-tete" style="margin-top:10px"></div>`;
-  const boutons = `
-        <div class="actions" style="margin-top:14px">
-          <button class="btn" id="modif">Modifier</button>
-          ${m.cle_modele ? `<button class="btn" id="image-modele" title="Montrée pour toutes les ${esc(m.modele)} qui n'ont pas leur propre photo">Image du modèle ${esc(m.modele)}</button>` : ""}
-          <button class="btn" id="photo">${m.photo_propre ? "Changer la photo de cette machine" : "Photo de cette machine"}</button>
-          ${m.photo_propre ? `<button class="btn" id="sans-photo">Retirer sa photo</button>` : ""}
-        </div>`;
+  // statistiques en une ligne discrète
+  const stats = `<div class="stats-mini">
+        <span><b>${siennes.length}</b> impression${siennes.length > 1 ? "s" : ""}</span>
+        <span><b>${reussite ?? "–"}${reussite !== null ? " %" : ""}</b> réussite</span>
+        <span><b>${nb(heures, 1)} h</b> d'impression</span>
+        <span><b>${nb(grammes / 1000, 2)} kg</b> filament</span></div>`;
+  const modifier = `<button class="btn petit discret" id="modif">Modifier la machine</button>`;
   page.innerHTML = `
     <div class="fil"><a href="#/machines">Machines</a> /</div>
     ${m.jumeau ? `
     <div class="scene-imp">
+      <aside class="infos-imp">${titre}<div class="panneau-direct" id="direct"></div>${stats}${modifier}</aside>
       <div class="jumeau" id="jumeau"><div class="vide">Chargement du modèle 3D…</div></div>
-      <aside class="panneau-imp">${titre}<div class="panneau-direct" id="direct"></div>${boutons}</aside>
     </div>` : `
     <div class="tete-imp">
       <div class="grande-vignette" id="vignette"></div>
-      <div class="tete-imp-texte">${titre}${boutons}</div>
+      <div class="tete-imp-texte">${titre}${stats}${modifier}</div>
     </div>`}
     <div class="deux">
       <div class="pile">
@@ -982,11 +999,6 @@ pages.machine = async (params, id) => {
         <section class="carte"><h2>Historique</h2>${tableImpressions(siennes)}</section>
       </div>
       <div class="pile">
-        <section class="carte"><h2>Statistiques</h2><div class="chiffres mini">
-          <div class="chiffre"><b>${siennes.length}</b><span>impressions</span></div>
-          <div class="chiffre"><b>${reussite ?? "–"}${reussite !== null ? " %" : ""}</b><span>réussite</span></div>
-          <div class="chiffre"><b>${nb(heures, 1)} h</b><span>d'impression</span></div>
-          <div class="chiffre"><b>${nb(grammes / 1000, 2)} kg</b><span>filament</span></div></div></section>
         <section class="carte"><h2>Caractéristiques</h2><dl class="infos">
           <dt>Marque</dt><dd>${esc(m.marque || "–")}</dd><dt>Modèle</dt><dd>${esc(m.modele || "–")}</dd>
           <dt>Technologie</dt><dd>${m.techno === "resine" ? "Résine" : "Filament (FDM)"}</dd>
@@ -1026,7 +1038,8 @@ pages.machine = async (params, id) => {
     if (jumeau) {
       jumeau.maj(m.pilote === "manuel" && enCours ? { etat: "impression", progression: 50 } : e);
       const f = ["impression", "pause", "preparation", "terminee"].includes(e.etat) || enCours ? pieceImprimee(e) : null;
-      jumeau.piece(f ? `/api/fichiers/${f.id}/contenu` : null, f?.type);
+      const imprime = ["impression", "pause", "preparation", "terminee"].includes(e.etat) || enCours;
+      jumeau.piece(f ? `/api/fichiers/${f.id}/contenu` : imprime ? `generique:${(e.couches || 150) * 0.2}` : null, f?.type);
     }
     const v = imageMachine(m, e);
     if ($("#vignette") && $("#vignette").dataset.v !== v) { $("#vignette").innerHTML = v; $("#vignette").dataset.v = v; }
@@ -1037,20 +1050,7 @@ pages.machine = async (params, id) => {
   rendre(etats[m.id]);
   minuterie = setInterval(async () => rendre((await api("etat-machines"))[m.id]), 3000);
 
-  $("#modif").onclick = () => editer("machines", champsMachine(), m, (r) => (r ? route() : (location.hash = "#/machines")));
-  const choisirImage = (chemin, message) => {
-    const entree = Object.assign(document.createElement("input"), { type: "file", accept: "image/jpeg,image/png,image/webp" });
-    entree.onchange = async () => {
-      const fd = new FormData();
-      fd.append("photo", entree.files[0]);
-      try { await api(chemin, { method: "PUT", body: fd }); toast(message); route(); }
-      catch (e) { toast("Erreur : " + e.message); }
-    };
-    entree.click();
-  };
-  $("#photo").onclick = () => choisirImage(`machines/${m.id}/photo`, "Photo enregistrée");
-  $("#image-modele")?.addEventListener("click", () => choisirImage(`modeles/${m.cle_modele}/image`, `Image enregistrée pour toutes les ${m.modele}`));
-  $("#sans-photo")?.addEventListener("click", async () => { await api(`machines/${m.id}/photo`, { method: "DELETE" }); route(); });
+  $("#modif").onclick = () => editer("machines", champsMachine(m), m, (r) => (r ? route() : (location.hash = "#/machines")));
   $("#direct").onclick = async (ev) => {
     const b = ev.target.closest("[data-statut]");
     if (b) { await api("machines/" + m.id, { method: "PUT", body: { statut_manuel: b.dataset.statut } }); route(); }

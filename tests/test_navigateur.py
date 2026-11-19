@@ -216,7 +216,7 @@ def test_interface_machines_cartes_et_page(serveur):
             assert "imp-dessin" in carte.group(0) and m["nom"] in carte.group(0)
         assert "Bambu Lab A1 mini" in dom and "Anycubic Kobra 3" in dom and "Maintenance" in dom and "À configurer" in dom
         dom = page(f"{base}/#/machine/{ko['id']}", budget_ms=8000)
-        for texte in ["Kobra essai", "En ce moment", "Historique", "Statistiques", "Caractéristiques", "Lancer une impression", 'data-statut="libre"']:
+        for texte in ["Kobra essai", "En ce moment", "Historique", 'class="stats-mini"', "Caractéristiques", "Lancer une impression", 'data-statut="libre"']:
             assert texte in dom, texte
         assert 'id="vignette"' in dom and "imp-dessin" in dom
     finally:
@@ -236,7 +236,7 @@ def jumeau_essai():
 
 
 def test_interface_jumeau_3d(serveur):
-    """Page d'une machine dont le modèle a un jumeau en traits : grande vue 3D (WebGL) et panneau d'informations."""
+    """Page d'une machine dont le modèle a un jumeau en traits : infos à gauche, grande vue 3D (WebGL) à droite."""
     import json as _json
 
     import atelier3d.app as A
@@ -252,7 +252,10 @@ def test_interface_jumeau_3d(serveur):
         assert 'id="jumeau"' in dom and "<canvas" in dom, "vue 3D absente"
         assert "Modèle 3D indisponible" not in dom and "Chargement du modèle 3D" not in dom
         assert 'class="jumeau-hud"' in dom and "Z " in dom
-        assert re.search(r'class="panneau-imp"[\s\S]*Jumeau essai[\s\S]*id="direct"', dom), "panneau d'informations absent"
+        assert re.search(r'class="infos-imp"[\s\S]*Jumeau essai[\s\S]*id="direct"[\s\S]*id="jumeau"', dom), \
+            "infos à gauche, vue 3D à droite"
+        assert 'class="stats-mini"' in dom and 'id="modif"' in dom
+        assert "Photo de cette machine" not in dom, "le choix des images est dans « Modifier », pas sur la page"
     finally:
         with httpx.Client(base_url=base, timeout=30) as c:
             c.delete(f"/api/impressions/{i['id']}"); c.delete(f"/api/machines/{m['id']}")

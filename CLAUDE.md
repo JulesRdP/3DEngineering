@@ -51,6 +51,8 @@ Variables : `HOTE`, `PORT` (lancement), `ATELIER3D_DONNEES` (dossier des donnée
   `static/jumeau3d.js` : arêtes CAO par groupe (fixe, plateau, portique, tête), pièce en cours (impression notée,
   sinon fichier dont le nom ressemble au travail annoncé) coupée à la hauteur atteinte, tête / axe X / plateau
   animés pendant l'impression. Repère : y vers le haut, plateau sur z, tête sur x (plateau mobile, type A1).
+  Mise en page : infos en colonne à gauche, vue 3D sans cadre à droite, fondue dans la page (masque radial),
+  couleurs selon le thème clair / sombre. Photo et image du modèle se choisissent dans « Modifier la machine ».
 - `atelier3d/static/` : interface page unique en JS vanilla (modules ES, routes dans `#hash`), three.js
   vendorisé dans `static/vendor/` (pas de npm, pas de build). `vision.js` = vue 3D ; `chargerObjet` calcule les
 normales des 3MF (le chargeur three.js n'en fait pas, et nos matériaux remplacent les siens). Styles d'affichage

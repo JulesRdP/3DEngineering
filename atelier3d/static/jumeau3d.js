@@ -5,7 +5,12 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { chargerObjet } from "/static/vision.js";
 
-const COULEUR_TRAITS = 0x6fd6ff;
+// Couleurs selon le thème de la page (la vue n'a pas de fond à elle : elle se fond dans la page)
+const sombre = () => window.matchMedia("(prefers-color-scheme: dark)").matches;
+const THEMES = {
+  sombre: { traits: 0x6fd6ff, vives: 0.85, douces: 0.22, grille: 0.07, melange: THREE.AdditiveBlending },
+  clair: { traits: 0x0a6f9c, vives: 0.75, douces: 0.2, grille: 0.12, melange: THREE.NormalBlending },
+};
 const COULEUR_PIECE = 0xff8a3d;
 
 const cacheTraits = new Map();
@@ -42,9 +47,8 @@ export class JumeauImprimante {
     conteneur.append(r.domElement);
     const scene = (this.scene = new THREE.Scene());
 
-    const mat = (opacite, couleur = COULEUR_TRAITS) => new THREE.LineBasicMaterial({ color: couleur, transparent: true, opacity: opacite,
-      blending: THREE.AdditiveBlending, depthWrite: false });
-    this.mats = { vives: mat(0.8), douces: mat(0.22) };
+    const mat = () => new THREE.LineBasicMaterial({ transparent: true, depthWrite: false });
+    this.mats = { vives: mat(), douces: mat() };
     this.groupes = {};
     for (const g of ["fixe", "plateau", "portique", "tete"]) scene.add((this.groupes[g] = new THREE.Group()));
     for (const p of d.pieces) {
@@ -56,8 +60,11 @@ export class JumeauImprimante {
     // boîte de la machine (au repos) : sol, caméra, grille
     const boite = new THREE.Box3().setFromObject(scene);
     const taille = boite.getSize(new THREE.Vector3()), centre = boite.getCenter(new THREE.Vector3());
-    const grille = new THREE.GridHelper(Math.max(taille.x, taille.z) * 2.2, 22, COULEUR_TRAITS, COULEUR_TRAITS);
-    grille.material.transparent = true; grille.material.opacity = 0.07; grille.material.depthWrite = false;
+    const grille = (this.grille = new THREE.GridHelper(Math.max(taille.x, taille.z) * 2.2, 22, 0xffffff, 0xffffff));
+    grille.material.transparent = true; grille.material.depthWrite = false;
+    this._theme();
+    this.mq = window.matchMedia("(prefers-color-scheme: dark)");
+    this.mq.addEventListener("change", (this._surTheme = () => this._theme()));
     grille.position.set(centre.x, boite.min.y, centre.z);
     scene.add(grille);
 
@@ -85,10 +92,10 @@ export class JumeauImprimante {
     this.empreinte = { x: 0, z: 0, ax: 15, az: 15, hauteur: 0 };
 
     this.camera = new THREE.PerspectiveCamera(32, 1, 1, 20000);
-    const dist = taille.length() * 1.2;
+    const dist = taille.length() * 1.4;
     this.camera.position.set(centre.x + dist * 0.45, centre.y + dist * 0.42, centre.z + dist * 0.78);
     this.controles = new OrbitControls(this.camera, r.domElement);
-    this.controles.target.copy(centre).setY(centre.y * 0.75);
+    this.controles.target.copy(centre).setY(centre.y * 0.85);
     this.controles.enableDamping = true;
     this.controles.autoRotate = true;
     this.controles.autoRotateSpeed = 0.35;
@@ -112,6 +119,12 @@ export class JumeauImprimante {
     boucle();
   }
 
+  _theme() {
+    const t = (this.th = THEMES[sombre() ? "sombre" : "clair"]);
+    for (const [k, m] of Object.entries(this.mats)) { m.color.set(t.traits); m.opacity = t[k]; m.blending = t.melange; m.needsUpdate = true; }
+    this.grille.material.color.set(t.traits); this.grille.material.opacity = t.grille;
+  }
+
   _dimensionner() {
     const { clientWidth: l, clientHeight: h } = this.conteneur;
     if (!l || !h) return;
@@ -123,23 +136,31 @@ export class JumeauImprimante {
   // État en direct (pilote) : etat, progression, couche, couches, temp_buse. hauteurPiece : hauteur réelle connue.
   maj(etat = {}) { this.etat = etat || {}; }
 
-  // Pièce en cours d'impression (STL / 3MF de l'atelier), ou null.
+  // Pièce en cours d'impression (STL / 3MF de l'atelier) ; « generique:<hauteur> » = cube quand le fichier n'est
+  // pas dans l'atelier ; null = rien sur le plateau.
   async piece(url, type) {
     if (url === this.urlPiece) return;
     this.urlPiece = url;
     this.support.clear();
+    this.cadreCouche = null;
+    this.empreinte = { x: 0, z: 0, ax: 15, az: 15, hauteur: 0 };
     if (!url) return;
-    let objet;
-    try { objet = await chargerObjet(url, type); } catch { return; }
-    if (url !== this.urlPiece) return;
-    objet.updateMatrixWorld(true);
     const brut = [];
-    objet.traverse((o) => {
-      if (!o.isMesh) return;
-      const geo = o.geometry.clone().applyMatrix4(o.matrixWorld);
-      geo.rotateX(-Math.PI / 2); // CAO z vers le haut → y vers le haut
-      brut.push(geo);
-    });
+    if (url.startsWith("generique:")) {
+      const h = Math.max(5, Number(url.split(":")[1]) || 30);
+      brut.push(new THREE.BoxGeometry(25, h, 25).translate(0, h / 2, 0));
+    } else {
+      let objet;
+      try { objet = await chargerObjet(url, type); } catch { return; }
+      if (url !== this.urlPiece) return;
+      objet.updateMatrixWorld(true);
+      objet.traverse((o) => {
+        if (!o.isMesh) return;
+        const geo = o.geometry.clone().applyMatrix4(o.matrixWorld);
+        geo.rotateX(-Math.PI / 2); // CAO z vers le haut → y vers le haut
+        brut.push(geo);
+      });
+    }
     if (!brut.length) return;
     const boite = new THREE.Box3();
     for (const g of brut) { g.computeBoundingBox(); boite.union(g.boundingBox); }
@@ -194,12 +215,9 @@ export class JumeauImprimante {
     const chaude = (Number(e.temp_buse) || 0) > 60 || imprime;
     this.lueur.visible = chaude;
     if (chaude) this.lueur.material.opacity = 0.65 + 0.3 * Math.sin(maintenant / 260);
-    this.mats.vives.opacity = actif ? 0.85 : 0.6;
+    this.mats.vives.opacity = this.th.vives * (actif ? 1 : 0.75);
 
-    const hud = [`Z ${(actif || e.etat === "terminee" ? hAtteinte : 0).toFixed(2)} mm`];
-    if (e.couches) hud.push(`couche ${e.couche ?? 0} / ${e.couches}`);
-    if (e.temp_buse !== undefined) hud.push(`buse ${Math.round(e.temp_buse)} °C`, `plateau ${Math.round(e.temp_plateau)} °C`);
-    const texte = hud.join("   ·   ");
+    const texte = `Z ${(actif || e.etat === "terminee" ? hAtteinte : 0).toFixed(2)} mm`;
     if (this.hud.textContent !== texte) this.hud.textContent = texte;
     this.controles.update();
   }
@@ -207,6 +225,7 @@ export class JumeauImprimante {
   detruire() {
     cancelAnimationFrame(this.raf);
     this.taille.disconnect();
+    this.mq.removeEventListener("change", this._surTheme);
     this.controles.dispose();
     this.scene.traverse((o) => o.geometry?.dispose());
     this.rendu.dispose();
