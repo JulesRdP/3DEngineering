@@ -49,7 +49,8 @@ class PiloteBambu:
         self.client = c
         self.etat = {"connexion": "connexion..."}
         try:
-            c.connect_async(self.m["adresse"], 8883, keepalive=30)
+            hote, _, port = self.m["adresse"].strip().partition(":")  # « IP » ou « IP:port » (fausse A1)
+            c.connect_async(hote, int(port or 8883), keepalive=30)
             c.loop_start()
         except Exception as e:
             self.etat = {"connexion": "erreur", "message": str(e)}

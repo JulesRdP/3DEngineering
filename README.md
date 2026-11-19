@@ -60,6 +60,12 @@ Les données (base SQLite + fichiers + miniatures) sont dans `data/`. Sauvegarde
 
     .venv/bin/python -m outils.importer_poignee   # premier remplissage (machines, filaments, projet Poignée Dex1)
     .venv/bin/python -m outils.reanalyser         # recalcule dimensions, miniatures et formes
+    .venv/bin/python -m outils.fausse_a1          # fausse Bambu A1 sur le réseau local, pour essayer sans vraie Bambu
+
+La fausse A1 se comporte comme une vraie en mode réseau local (MQTT chiffré port 8883, code d'accès) et enchaîne
+seule des impressions fictives ; pause, reprise et arrêt marchent depuis l'appli. Dans l'appli : pilote Bambu,
+adresse `127.0.0.1` (ou l'IP du PC qui la fait tourner, `IP:port` si `--port`), n° de série `0309CA000000A1F`,
+code d'accès `12345678`. Options : `--duree` (s par impression), `--attente` (s entre deux, 0 = aucune seule).
 
 ## Tests
 

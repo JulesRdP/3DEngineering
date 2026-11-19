@@ -38,7 +38,8 @@ Variables : `HOTE`, `PORT` (lancement), `ATELIER3D_DONNEES` (dossier des donnée
   réglage = une ligne ici, lue par `reglages.valeur(db, cle)` (serveur) ou `reglage(cle)` (app.js). Clé rangée
   dans sa section (`plans.…`, `general.…`), vérifié par les tests.
 - `atelier3d/machines.py` : un pilote par machine (`PiloteBambu` MQTT TLS, `PiloteMoonraker` HTTP,
-  `PiloteManuel`), gérés par `Parc`, resynchronisé à chaque modification d'une machine.
+  `PiloteManuel`), gérés par `Parc`, resynchronisé à chaque modification d'une machine. Adresse Bambu = `IP` ou
+  `IP:port`. Une machine `manuel` passe seule en « occupée » / « libre » selon ses impressions en cours.
 - `atelier3d/static/` : interface page unique en JS vanilla (modules ES, routes dans `#hash`), three.js
   vendorisé dans `static/vendor/` (pas de npm, pas de build). `vision.js` = vue 3D ; `chargerObjet` calcule les
 normales des 3MF (le chargeur three.js n'en fait pas, et nos matériaux remplacent les siens). Styles d'affichage
@@ -91,6 +92,8 @@ volontairement (et on le dit).
 - `test_api.py` : chaque route, cas nominaux et refus (404, 400, 410), cartouche, réanalyse, sauvegarde.
 - `test_formes.py` : valeurs exactes reconnues sur les pièces de référence, axes inclinés, maillages grossiers
   ou très fins, trous borgnes, performance.
+- `test_machines.py` : `PiloteBambu` contre la fausse A1 (`outils/fausse_a1.py`, MQTT 3.1.1 TLS minimal en pur
+  Python, clé jetable `outils/fausse_a1.pem`) : état, pause / reprise / arrêt, code d'accès refusé, cycle simulé.
 - `test_navigateur.py` : démarre un vrai serveur, ouvre `tests/navigateur/essais.html` dans Edge / Chrome sans
   fenêtre (traceur, PDF, arêtes, plan : cotes attendues présentes une seule fois, pas de cote évidente, pas de
   texte qui se chevauche, rien sur le cartouche…) et vérifie chaque page de l'interface. Ignoré sans navigateur
