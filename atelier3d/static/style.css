@@ -208,32 +208,32 @@ dl.infos { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px;
 dl.infos dt { color: var(--muted); } dl.infos dd { margin: 0; font-family: var(--mono); overflow-wrap: anywhere; }
 
 /* ---- machines : cartes, page d'une machine, dessins (imprimantes.js) */
-.grille-imp { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
-.carte-imp { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
-  overflow: hidden; text-decoration: none; color: inherit; transition: border-color .15s, box-shadow .15s, transform .15s; }
-.carte-imp:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); box-shadow: var(--ombre); transform: translateY(-1px); }
-.carte-imp .vignette, .grande-vignette { position: relative; display: grid; place-items: center; height: 150px; padding: 12px;
-  background: radial-gradient(ellipse at 50% 30%, var(--surface) 0%, var(--surface2) 75%); border-bottom: 1px solid var(--line); }
-.carte-imp .vignette .pastille { position: absolute; top: 10px; right: 10px; }
-.carte-imp .corps { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 2px; }
+.grille-imp { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+.carte-imp { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 14px; align-items: center; padding: 14px 16px 14px 10px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--ombre);
+  text-decoration: none; color: inherit; transition: border-color .15s, box-shadow .15s, transform .15s; }
+.carte-imp:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); transform: translateY(-1px); }
+.carte-imp .vignette { display: grid; place-items: center; height: 120px; }
+.carte-imp .corps { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.carte-imp .ligne-titre { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
 .carte-imp h3 { margin: 0; font-size: 15px; }
+.carte-imp .modele + div { margin-top: 6px; }
+.carte-imp .ligne-titre .pastille { flex: none; }
 .carte-imp .modele { color: var(--muted); font-size: 12.5px; }
-.carte-imp .detail, #direct .detail { color: var(--muted); font-size: 12.5px; font-family: var(--mono); min-height: 1em; }
-.carte-imp .jauge { margin: 6px 0 4px; }
+.carte-imp .detail, #direct .detail { color: var(--muted); font-size: 12.5px; font-family: var(--mono); min-height: 1em; margin-top: 4px; }
+.carte-imp .jauge { margin: 6px 0 2px; }
+.grande-vignette { display: grid; place-items: center; height: 220px; }
 .travail { display: flex; justify-content: space-between; gap: 8px; margin-top: 8px; font-size: 13px; }
 .travail span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .travail.grand { font-size: 15px; margin-top: 0; } .travail.grand b { font-size: 20px; font-variant-numeric: tabular-nums; }
 .jauge.grande { height: 12px; }
 .imp-dessin { width: auto; max-width: 100%; overflow: visible; }
-.carte-imp .vignette .imp-dessin { height: 124px; } .grande-vignette .imp-dessin { height: 184px; }
-.carte-imp .vignette, .grande-vignette { overflow: hidden; }
-.imp-photo { width: 100%; object-fit: contain; mix-blend-mode: multiply; }
-.carte-imp .vignette .imp-photo { height: 124px; } .grande-vignette .imp-photo { height: 184px; }
-/* image ou photo : vignette claire façon fiche produit (le fond blanc d'une image de fabricant s'y fond) */
-.vignette.avec-photo, .grande-vignette.avec-photo { background: radial-gradient(ellipse at 50% 35%, #ffffff 0%, #eceeea 80%); }
+.carte-imp .vignette .imp-dessin { height: 96px; } .grande-vignette .imp-dessin { height: 180px; }
+/* image sans fond (PNG détouré) posée directement sur la carte */
+.imp-photo { max-width: 100%; object-fit: contain; filter: drop-shadow(0 4px 8px rgba(0,0,0,.22)); }
+.carte-imp .vignette .imp-photo { height: 120px; } .grande-vignette .imp-photo { height: 220px; }
 .tete-imp { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 22px; align-items: center; margin-bottom: 18px; }
 .tete-imp h1 { margin: 0; }
-.grande-vignette { height: 210px; border: 1px solid var(--line); border-radius: var(--radius); }
 @media (max-width: 700px) { .tete-imp { grid-template-columns: 1fr; } }
 .pastille.grande { font-size: 13px; padding: 4px 10px; }
 .temps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }

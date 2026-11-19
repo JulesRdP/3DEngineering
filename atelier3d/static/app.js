@@ -318,14 +318,15 @@ const etatDe = (m, e = {}) => e.etat || e.connexion || "inconnu";
 
 function carteMachine(m, e = {}, imp = null) {
   return `<a class="carte-imp" href="#/machine/${m.id}" data-machine="${m.id}">
-    <div class="vignette${m.photo ? " avec-photo" : ""}">${vignetteMachine(m, e)}</div>
+    <div class="vignette">${vignetteMachine(m, e)}</div>
     <div class="corps">${corpsCarteMachine(m, e, imp)}</div></a>`;
 }
-const vignetteMachine = (m, e = {}) => `${imageMachine(m, e)}<span class="pastille ${ETATS_MACHINE[etatDe(m, e)] || "p-neutre"}">${esc(libelleEtat(etatDe(m, e)))}</span>`;
+const vignetteMachine = (m, e = {}) => imageMachine(m, e);
 function corpsCarteMachine(m, e = {}, imp = null) {
   const enCours = ["impression", "pause", "preparation"].includes(e.etat);
   const modele = [m.marque, m.modele].filter(Boolean).join(" ") || "Modèle non renseigné";
   return `<h3>${esc(m.nom)}</h3><div class="modele">${esc(modele)}</div>
+    <div><span class="pastille ${ETATS_MACHINE[etatDe(m, e)] || "p-neutre"}">${esc(libelleEtat(etatDe(m, e)))}</span></div>
     ${enCours ? `<div class="travail"><span>${esc(e.travail || "Impression")}</span><b>${e.progression ?? 0} %</b></div>
       <div class="jauge"><i style="width:${e.progression || 0}%"></i></div>
       <div class="detail">${detailImpression(e)}</div>`
@@ -956,7 +957,7 @@ pages.machine = async (params, id) => {
   page.innerHTML = `
     <div class="fil"><a href="#/machines">Machines</a> /</div>
     <div class="tete-imp">
-      <div class="grande-vignette${m.photo ? " avec-photo" : ""}" id="vignette"></div>
+      <div class="grande-vignette" id="vignette"></div>
       <div class="tete-imp-texte">
         <h1>${esc(m.nom)}</h1>
         <div class="sous">${esc([m.marque, m.modele].filter(Boolean).join(" ") || "Modèle non renseigné")} · ${esc(volumeTexte(m))} · buse ${nb(m.buse, 2)} mm</div>
