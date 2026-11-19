@@ -46,6 +46,11 @@ Variables : `HOTE`, `PORT` (lancement), `ATELIER3D_DONNEES` (dossier des donnée
   (`mix-blend-mode: multiply` : le fond blanc des images de fabricant disparaît). Sans image : `static/imprimantes.js` dessine la machine
   en SVG selon sa forme, devinée d'après marque / modèle (`forme` : porte-à-faux, portique, caisson, cadre) et
   animée selon l'état. Cartes des machines = liens vers `#/machine/<id>` (état en direct, commandes, historique).
+  Jumeau 3D : si `data/modeles/<cle>.traits.json` existe (fait par `outils/step_en_traits.py` depuis le STEP de
+  l'imprimante, OpenCascade dans un venv à part, pas une dépendance de l'appli), la page de la machine montre
+  `static/jumeau3d.js` : arêtes CAO par groupe (fixe, plateau, portique, tête), pièce en cours (impression notée,
+  sinon fichier dont le nom ressemble au travail annoncé) coupée à la hauteur atteinte, tête / axe X / plateau
+  animés pendant l'impression. Repère : y vers le haut, plateau sur z, tête sur x (plateau mobile, type A1).
 - `atelier3d/static/` : interface page unique en JS vanilla (modules ES, routes dans `#hash`), three.js
   vendorisé dans `static/vendor/` (pas de npm, pas de build). `vision.js` = vue 3D ; `chargerObjet` calcule les
 normales des 3MF (le chargeur three.js n'en fait pas, et nos matériaux remplacent les siens). Styles d'affichage
@@ -75,7 +80,7 @@ réglages `vue3d.*`, choix de la barre retenu par navigateur (localStorage). Éc
     interpolation entre la pose de l'aperçu et la pose exacte de la vue, tour complet) ; animations par
     `boucle()` (rAF + minuterie de secours). Options = réglages `plans.piece.*`.
   Règles de dessin tirées du cours de dessin industriel de l'utilisateur (BME, ISO) : les respecter.
-- `outils/` : scripts lancés avec `python -m outils.<nom>`.
+- `outils/` : scripts lancés avec `python -m outils.<nom>` (`fausse_a1`, `step_en_traits`, `reanalyser`…).
 - `data/` (ignoré par git) : `atelier.db`, `fichiers/<projet_id>/`, `miniatures/<fichier_id>.png`.
 
 ## Conventions

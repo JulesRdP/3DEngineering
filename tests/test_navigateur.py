@@ -222,3 +222,38 @@ def test_interface_machines_cartes_et_page(serveur):
     finally:
         with httpx.Client(base_url=base, timeout=30) as c:
             c.delete(f"/api/machines/{a1['id']}"); c.delete(f"/api/machines/{ko['id']}")
+
+
+def jumeau_essai():
+    """Imprimante minimale en traits (repère de outils/step_en_traits.py) : bâti, plateau, axe X, tête."""
+    carre = lambda y, d: [-d, y, -d, d, y, -d, d, y, -d, d, y, d, d, y, d, -d, y, d, -d, y, d, -d, y, -d]
+    return {"version": 1, "haut": "y", "axe_plateau": "z", "volume": [100, 100, 100], "buse": [0, 60, 0],
+            "plaque": {"haut": 10, "centre": [0, 10, 0]},
+            "pieces": [{"nom": "bati", "groupe": "fixe", "vives": [-80, 0, 0, -80, 150, 0, 80, 0, 0, 80, 150, 0], "douces": []},
+                       {"nom": "plateau", "groupe": "plateau", "vives": carre(10, 50), "douces": []},
+                       {"nom": "axe x", "groupe": "portique", "vives": [-80, 70, 0, 80, 70, 0], "douces": []},
+                       {"nom": "tete", "groupe": "tete", "vives": [0, 60, 0, 0, 80, 0], "douces": carre(75, 8)}]}
+
+
+def test_interface_jumeau_3d(serveur):
+    """Page d'une machine dont le modèle a un jumeau en traits : grande vue 3D (WebGL) et panneau d'informations."""
+    import json as _json
+
+    import atelier3d.app as A
+    base, ids = serveur
+    A.IMAGES_MODELES.mkdir(parents=True, exist_ok=True)
+    (A.IMAGES_MODELES / "essai-jumeau.traits.json").write_text(_json.dumps(jumeau_essai()))
+    with httpx.Client(base_url=base, timeout=30) as c:
+        m = c.post("/api/machines", json={"nom": "Jumeau essai", "marque": "Essai", "modele": "Jumeau"}).json()
+        i = c.post("/api/impressions", json={"fichier_id": ids["cube"], "machine_id": m["id"], "resultat": "en_cours"}).json()
+    try:
+        assert m["jumeau"]
+        dom = page(f"{base}/#/machine/{m['id']}", budget_ms=10000)
+        assert 'id="jumeau"' in dom and "<canvas" in dom, "vue 3D absente"
+        assert "Modèle 3D indisponible" not in dom and "Chargement du modèle 3D" not in dom
+        assert 'class="jumeau-hud"' in dom and "Z " in dom
+        assert re.search(r'class="panneau-imp"[\s\S]*Jumeau essai[\s\S]*id="direct"', dom), "panneau d'informations absent"
+    finally:
+        with httpx.Client(base_url=base, timeout=30) as c:
+            c.delete(f"/api/impressions/{i['id']}"); c.delete(f"/api/machines/{m['id']}")
+        (A.IMAGES_MODELES / "essai-jumeau.traits.json").unlink()

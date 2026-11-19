@@ -954,25 +954,31 @@ pages.machine = async (params, id) => {
   const grammes = finies.reduce((t, i) => t + (i.grammes || 0) * (i.quantite || 1), 0);
   const connexion = { bambu_lan: "Bambu Lab réseau local", moonraker: "Klipper / Moonraker", manuel: "Aucune (état manuel)" }[m.pilote] || m.pilote;
   const sesPresets = presets.filter((p) => p.machine_id === m.id);
-  page.innerHTML = `
-    <div class="fil"><a href="#/machines">Machines</a> /</div>
-    <div class="tete-imp">
-      <div class="grande-vignette" id="vignette"></div>
-      <div class="tete-imp-texte">
+  const titre = `
         <h1>${esc(m.nom)}</h1>
         <div class="sous">${esc([m.marque, m.modele].filter(Boolean).join(" ") || "Modèle non renseigné")} · ${esc(volumeTexte(m))} · buse ${nb(m.buse, 2)} mm</div>
-        <div id="etat-tete" style="margin-top:10px"></div>
+        <div id="etat-tete" style="margin-top:10px"></div>`;
+  const boutons = `
         <div class="actions" style="margin-top:14px">
           <button class="btn" id="modif">Modifier</button>
           ${m.cle_modele ? `<button class="btn" id="image-modele" title="Montrée pour toutes les ${esc(m.modele)} qui n'ont pas leur propre photo">Image du modèle ${esc(m.modele)}</button>` : ""}
           <button class="btn" id="photo">${m.photo_propre ? "Changer la photo de cette machine" : "Photo de cette machine"}</button>
           ${m.photo_propre ? `<button class="btn" id="sans-photo">Retirer sa photo</button>` : ""}
-        </div>
-      </div>
-    </div>
+        </div>`;
+  page.innerHTML = `
+    <div class="fil"><a href="#/machines">Machines</a> /</div>
+    ${m.jumeau ? `
+    <div class="scene-imp">
+      <div class="jumeau" id="jumeau"><div class="vide">Chargement du modèle 3D…</div></div>
+      <aside class="panneau-imp">${titre}<div class="panneau-direct" id="direct"></div>${boutons}</aside>
+    </div>` : `
+    <div class="tete-imp">
+      <div class="grande-vignette" id="vignette"></div>
+      <div class="tete-imp-texte">${titre}${boutons}</div>
+    </div>`}
     <div class="deux">
       <div class="pile">
-        <section class="carte"><h2>En ce moment</h2><div id="direct"></div></section>
+        ${m.jumeau ? "" : `<section class="carte"><h2>En ce moment</h2><div id="direct"></div></section>`}
         <section class="carte"><h2>Historique</h2>${tableImpressions(siennes)}</section>
       </div>
       <div class="pile">
@@ -995,10 +1001,35 @@ pages.machine = async (params, id) => {
     </div>`;
 
   const enCours = siennes.find((i) => i.resultat === "en_cours");
+  // Jumeau 3D : la pièce sur le plateau = celle de l'impression notée en cours, sinon le fichier dont le nom
+  // ressemble au travail annoncé par l'imprimante (« poignee_dex1_support » ↔ « Poignee Dex1 Support.stl »).
+  let jumeau = null;
+  const pieceImprimee = (e = {}) => {
+    const modeles = fichiers.filter((f) => ["stl", "3mf"].includes(f.type));
+    if (enCours?.fichier_id) return modeles.find((f) => f.id === enCours.fichier_id);
+    const norm = (t) => String(t || "").toLowerCase().replace(/\.(stl|3mf|gcode)$/, "").replace(/[^a-z0-9]/g, "");
+    const t = norm(e.travail);
+    return t ? modeles.find((f) => norm(f.nom) === t) || modeles.find((f) => norm(f.nom).includes(t) || (t.length > 5 && t.includes(norm(f.nom)))) : null;
+  };
+  if (m.jumeau) {
+    import("/static/jumeau3d.js").then(({ JumeauImprimante }) => JumeauImprimante.creer($("#jumeau"), m.jumeau)).then((j) => {
+      if (!$("#jumeau")) return j.detruire();
+      $("#jumeau .vide")?.remove();
+      jumeau = j;
+      rendre(dernier);
+    }).catch((err) => { const z = $("#jumeau"); if (z) z.innerHTML = `<div class="vide">Modèle 3D indisponible : ${esc(err.message)}</div>`; });
+  }
+  let dernier = etats[m.id];
   const rendre = (e = {}) => {
+    dernier = e;
     const etat = etatDe(m, e);
+    if (jumeau) {
+      jumeau.maj(m.pilote === "manuel" && enCours ? { etat: "impression", progression: 50 } : e);
+      const f = ["impression", "pause", "preparation", "terminee"].includes(e.etat) || enCours ? pieceImprimee(e) : null;
+      jumeau.piece(f ? `/api/fichiers/${f.id}/contenu` : null, f?.type);
+    }
     const v = imageMachine(m, e);
-    if ($("#vignette").dataset.v !== v) { $("#vignette").innerHTML = v; $("#vignette").dataset.v = v; }
+    if ($("#vignette") && $("#vignette").dataset.v !== v) { $("#vignette").innerHTML = v; $("#vignette").dataset.v = v; }
     $("#etat-tete").innerHTML = `<span class="pastille grande ${ETATS_MACHINE[etat] || "p-neutre"}">${esc(libelleEtat(etat))}</span>
       ${e.message ? `<span class="sous" style="margin-left:8px">${esc(e.message)}</span>` : ""}`;
     $("#direct").innerHTML = directMachine(m, e, enCours);

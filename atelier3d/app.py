@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -57,6 +58,7 @@ async def sans_cache_perime(requete, appel):
     return reponse
 
 
+app.add_middleware(GZipMiddleware, minimum_size=20000)   # traits des jumeaux 3D (JSON ~1 Mo → ~300 ko)
 app.mount("/static", StaticFiles(directory=ICI / "static"), name="static")
 
 
@@ -107,6 +109,8 @@ def _masquer(m):
     cle = cle_modele(m.get("marque"), m.get("modele"))
     image = _image_modele(cle) if cle else None
     m["photo_propre"] = bool(photo)
+    traits = IMAGES_MODELES / f"{cle}.traits.json" if cle else None
+    m["jumeau"] = f"/api/modeles/{cle}/traits?v={int(traits.stat().st_mtime)}" if traits and traits.exists() else None
     m["cle_modele"] = cle
     m["photo"] = (f"/api/machines/{m['id']}/photo?v={int(photo.stat().st_mtime)}" if photo
                   else f"/api/modeles/{cle}/image?v={int(image.stat().st_mtime)}" if image else None)
@@ -253,6 +257,15 @@ def image_modele(cle: str):
     if not p:
         raise HTTPException(404, "pas d'image pour ce modèle")
     return FileResponse(p, media_type=FORMATS_PHOTO[p.suffix])
+
+
+@app.get("/api/modeles/{cle}/traits")
+def traits_modele(cle: str):
+    """Jumeau en traits du modèle (outils/step_en_traits.py) : arêtes CAO par pièce, groupes mobiles, buse, plaque."""
+    p = IMAGES_MODELES / f"{cle}.traits.json"
+    if not re.fullmatch(r"[a-z0-9-]+", cle) or not p.exists():
+        raise HTTPException(404, "pas de modèle 3D pour ce modèle d'imprimante")
+    return FileResponse(p, media_type="application/json")
 
 
 @app.put("/api/modeles/{cle}/image")

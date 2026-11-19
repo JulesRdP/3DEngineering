@@ -51,6 +51,10 @@ Les données (base SQLite + fichiers + miniatures) sont dans `data/`. Sauvegarde
 - **Machines** : une carte par imprimante (dessin du modèle ou photo déposée, nom, modèle, état en direct) ; un clic
   ouvre sa page : impression en cours (progression, couches, températures), pause / reprise / arrêt, lancer une
   impression et changer l'état d'une machine sans connexion, historique, statistiques, caractéristiques, presets.
+  Quand le modèle a son jumeau 3D (A1 pour l'instant), la page montre en grand l'imprimante dessinée en traits, avec
+  la pièce qui se construit sur le plateau et la tête, l'axe X et le plateau qui bougent pendant l'impression ;
+  informations et commandes à droite. Fabriquer le jumeau d'un autre modèle depuis son STEP :
+  `outils/step_en_traits.py` (instructions en tête du fichier).
   Pilote `bambu_lan` (MQTT TLS port 8883, IP + numéro de série + code d'accès), `moonraker`
   (Klipper) ou `manuel`. Pause / reprise / arrêt depuis l'appli.
 - **Filaments** : stock en grammes, déduit automatiquement quand une impression est notée réussie ou ratée.

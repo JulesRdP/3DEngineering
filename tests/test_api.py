@@ -277,3 +277,15 @@ def test_image_du_modele(client):
     client.delete("/api/modeles/bambu-lab-a1/image")
     assert client.get(f"/api/machines/{a['id']}").json()["photo"] is None
     assert client.get("/api/machines/" + str(client.post("/api/machines", json={"nom": "sans modèle"}).json()["id"])).json()["cle_modele"] == ""
+
+
+def test_jumeau_du_modele(client):
+    """Traits 3D d'un modèle (outils/step_en_traits.py) : servis, signalés sur ses machines, compressés."""
+    m = client.post("/api/machines", json={"nom": "A", "marque": "Bambu Lab", "modele": "A1"}).json()
+    assert m["jumeau"] is None and client.get("/api/modeles/bambu-lab-a1/traits").status_code == 404
+    client.module.IMAGES_MODELES.mkdir(parents=True, exist_ok=True)
+    (client.module.IMAGES_MODELES / "bambu-lab-a1.traits.json").write_text('{"version":1,"pieces":[]' + ' ' * 30000 + '}')
+    assert client.get(f"/api/machines/{m['id']}").json()["jumeau"].startswith("/api/modeles/bambu-lab-a1/traits?v=")
+    r = client.get("/api/modeles/bambu-lab-a1/traits", headers={"Accept-Encoding": "gzip"})
+    assert r.status_code == 200 and r.json()["version"] == 1 and r.headers.get("content-encoding") == "gzip"
+    assert client.get("/api/modeles/..%2Fatelier/traits").status_code == 404
