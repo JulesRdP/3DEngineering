@@ -157,6 +157,7 @@ const MODELES_MACHINE = {
   "Bambu Lab P1P": { marque: "Bambu Lab", modele: "P1P", volume_x: 256, volume_y: 256, volume_z: 256, pilote: "bambu_lan" },
   "Bambu Lab X1 Carbon": { marque: "Bambu Lab", modele: "X1 Carbon", volume_x: 256, volume_y: 256, volume_z: 256, pilote: "bambu_lan" },
   "Anycubic Kobra X": { marque: "Anycubic", modele: "Kobra X", pilote: "manuel" },
+  "Anycubic Kobra S1": { marque: "Anycubic", modele: "Kobra S1", volume_x: 250, volume_y: 250, volume_z: 250, pilote: "manuel" },
   "Anycubic Kobra 3": { marque: "Anycubic", modele: "Kobra 3", volume_x: 250, volume_y: 250, volume_z: 260, pilote: "manuel" },
 };
 const MATIERES = {
