@@ -40,6 +40,9 @@ Les données (base SQLite + fichiers + miniatures) sont dans `data/`. Sauvegarde
     cartouche (désignation, n° de plan, matière, masse, échelle, symbole de projection, tolérances ISO 2768…)
     rempli avec le bouton « Cartouche… ».
 
+  Le plan n'est calculé que quand on le demande (« Générer le plan »), puis il est gardé et réaffiché tel quel ;
+  si la pièce, ses repères, le cartouche ou les réglages des plans changent, il est marqué « à mettre à jour ».
+
   Les trous, oblongs et arrondis sont reconnus dans le maillage au dépôt (quel que soit l'axe). Les cotes sont
   mesurées sur le STL / 3MF : exactes pour un export CAO ; cônes (fraisures) et surfaces libres non reconnus.
   PDF vectoriel téléchargeable ou rangé dans « Plans et documents » du projet. Après une mise à jour, lancer

@@ -115,6 +115,27 @@ def test_reperes_validation(client):
     assert client.put(f"/api/fichiers/{f['id']}/reperes", json={"reperes": [{"pos": [1, "x", 3]}]}).status_code == 400
 
 
+def test_plan_garde(client):
+    p = client.post("/api/projets", json={"nom": "Plan"}).json()
+    f = deposer(client, p["id"], "c.stl", cube_stl())
+    assert client.get(f"/api/fichiers/{f['id']}/plan").json() == {}
+    feuille = {"format": "A4", "largeur": 297, "hauteur": 210, "titre": "Face", "infos": {"vues": []},
+               "ops": [{"t": "texte", "x": 1, "y": 2, "s": "Ø3", "h": 3.5, "angle": 0, "gras": False}]}
+    r = client.put(f"/api/fichiers/{f['id']}/plan", json={"cle": "k1", "feuilles": [feuille, feuille]})
+    assert r.status_code == 200 and r.json()["cle"] == "k1"
+    garde = client.get(f"/api/fichiers/{f['id']}/plan").json()
+    assert garde["cle"] == "k1" and garde["cree"] and garde["feuilles"] == [feuille, feuille]
+    for mauvais in [{"cle": "", "feuilles": [feuille]}, {"cle": "k", "feuilles": []}, {"cle": "k", "feuilles": [{"ops": 3}]},
+                    {"cle": "k", "feuilles": [feuille] * 11}, {"feuilles": [feuille]}]:
+        assert client.put(f"/api/fichiers/{f['id']}/plan", json=mauvais).status_code == 400, mauvais
+    assert client.get("/api/fichiers/999/plan").status_code == 404
+    assert client.put("/api/fichiers/999/plan", json={"cle": "k", "feuilles": [feuille]}).status_code == 404
+    # le plan part avec le fichier
+    client.delete(f"/api/fichiers/{f['id']}")
+    f2 = deposer(client, p["id"], "c.stl", cube_stl())
+    assert client.get(f"/api/fichiers/{f2['id']}/plan").json() == {}
+
+
 def test_cartouche(client):
     p = client.post("/api/projets", json={"nom": "Cart"}).json()
     f = deposer(client, p["id"], "c.stl", cube_stl())

@@ -25,6 +25,16 @@ export class Feuille {
     this.ops = [];
   }
 
+  // Données pures (JSON) : un plan généré est gardé sur le serveur et réaffiché sans être recalculé.
+  donnees() {
+    return { format: this.format, largeur: this.largeur, hauteur: this.hauteur, titre: this.titre || "", infos: this.infos || {}, ops: this.ops };
+  }
+
+  static depuisDonnees(d) {
+    const F = Object.create(Feuille.prototype);
+    return Object.assign(F, { format: d.format, largeur: d.largeur, hauteur: d.hauteur, titre: d.titre, infos: d.infos, ops: d.ops });
+  }
+
   trait(pts, { ep = EP.fin, motif = "continu", ferme = false } = {}) {
     if (pts.length >= 2) this.ops.push({ t: "trait", pts, ep, motif: typeof motif === "string" ? MOTIFS[motif] : motif, ferme });
   }

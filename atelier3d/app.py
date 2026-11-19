@@ -21,6 +21,7 @@ ICI = Path(__file__).parent
 DONNEES = Path(os.environ.get("ATELIER3D_DONNEES", ICI.parent / "data"))
 FICHIERS = DONNEES / "fichiers"
 MINIATURES = DONNEES / "miniatures"
+PLANS = DONNEES / "plans"          # plans générés par le navigateur, gardés : <fichier_id>.json
 
 db = Base(DONNEES / "atelier.db")
 parc = Parc()
@@ -199,6 +200,7 @@ def _effacer_fichier_disque(f):
     if chemin.exists() and not autres["n"]:
         chemin.unlink()
     (MINIATURES / f"{f['id']}.png").unlink(missing_ok=True)
+    (PLANS / f"{int(f['id'])}.json").unlink(missing_ok=True)
 
 
 def _analyser_plus_tard(fid, chemin, typ):
@@ -295,6 +297,37 @@ def maj_reperes(ident: int, corps: dict):
 
 
 CARTOUCHE = ["dessinateur", "verificateur", "date_verif", "matiere", "filament_id", "numero", "indice", "tolerance", "societe"]
+
+
+PLAN_MAX_OCTETS = 40_000_000
+
+
+@app.get("/api/fichiers/{ident}/plan")
+def plan_garde(ident: int):
+    """Plan déjà généré pour ce fichier : {cle, cree, feuilles: [données du traceur]}, ou {} s'il n'y en a pas.
+    La clé (calculée par le navigateur) dit avec quoi il a été fait : s'il ne correspond plus, l'interface propose
+    de le mettre à jour au lieu de le recalculer d'office."""
+    _existe("fichiers", ident)
+    chemin = PLANS / f"{ident}.json"
+    return Response(chemin.read_bytes() if chemin.exists() else b"{}", media_type="application/json")
+
+
+@app.put("/api/fichiers/{ident}/plan")
+def garder_plan(ident: int, corps: dict):
+    _existe("fichiers", ident)
+    cle, feuilles = corps.get("cle"), corps.get("feuilles")
+    if not isinstance(cle, str) or not cle or not isinstance(feuilles, list) or not 1 <= len(feuilles) <= 10:
+        raise HTTPException(400, "clé et 1 à 10 feuilles attendues")
+    if not all(isinstance(F, dict) and isinstance(F.get("ops"), list) for F in feuilles):
+        raise HTTPException(400, "feuille invalide")
+    donnees = json.dumps({"cle": cle[:300], "cree": maintenant(), "feuilles": feuilles}, separators=(",", ":")).encode()
+    if len(donnees) > PLAN_MAX_OCTETS:
+        raise HTTPException(413, "plan trop volumineux")
+    PLANS.mkdir(parents=True, exist_ok=True)
+    temp = PLANS / f"{ident}.json.tmp"
+    temp.write_bytes(donnees)
+    temp.replace(PLANS / f"{ident}.json")
+    return {"cle": cle[:300], "octets": len(donnees)}
 
 
 @app.put("/api/fichiers/{ident}/cartouche")

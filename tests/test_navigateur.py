@@ -99,9 +99,10 @@ def test_code_navigateur(serveur):
 
 
 def test_interface_onglet_plan(serveur):
-    """La vraie page de l'appli : l'onglet Plan s'ouvre et affiche le plan, avec ses boutons."""
+    """La vraie page de l'appli : l'onglet Plan, plan demandé (?plan=generer), affiché avec ses boutons.
+    (Changement voulu le 19/11 : le plan n'est plus calculé à l'ouverture de l'onglet, seulement sur demande.)"""
     base, ids = serveur
-    dom = page(f"{base}/#/fichier/{ids['v1']}?plan")
+    dom = page(f"{base}/#/fichier/{ids['v1']}?plan=generer")
     assert re.search(r'id="plan-toile"[\s\S]*?class="vis-cadre"[\s\S]*?class="vis-feuille"[\s\S]*?<svg', dom), "plan non affiché"
     assert 'class="vis-survol"' in dom, "calque de survol des vues (clic : pièce en 3D)"
     for bouton in ["plan-pdf", "plan-png", "plan-garder", "plan-cartouche"]:
@@ -149,9 +150,22 @@ def test_interface_barre_affichage_3d(serveur):
     assert 'data-curseur="contraste"' in dom and 'data-curseur="reflets"' in dom and 'data-couleur="gris"' in dom
 
 
+def test_interface_plan_sur_demande_puis_garde(serveur):
+    """Pas de calcul à l'ouverture de l'onglet ; une fois généré, le plan est gardé et réaffiché sans recalcul."""
+    base, ids = serveur
+    dom = page(f"{base}/#/fichier/{ids['tube']}?plan")
+    assert 'id="plan-premier"' in dom and "Pas encore de plan" in dom, "le plan ne doit pas être calculé d'office"
+    assert "vis-feuille" not in dom
+    dom = page(f"{base}/#/fichier/{ids['tube']}?plan=generer")
+    assert "Plan généré et enregistré" in dom and "vis-feuille" in dom
+    dom = page(f"{base}/#/fichier/{ids['tube']}?plan")
+    assert "réaffiché sans recalcul" in dom and re.search(r'class="vis-feuille"[\s\S]*?<svg', dom), "plan gardé non réaffiché"
+    assert "à mettre à jour" not in dom
+
+
 def test_interface_apercu_3d_a_cote_du_plan(serveur):
     base, ids = serveur
-    dom = page(f"{base}/#/fichier/{ids['v1']}?plan")
+    dom = page(f"{base}/#/fichier/{ids['v1']}?plan=generer")
     assert re.search(r'class="[^"]*\bvisionneuse\b[^"]*\bavec-apercu\b', dom), "aperçu 3D ouvert par défaut"
     assert re.search(r'class="vis-apercu-3d"><canvas', dom), "aperçu 3D affiché"
 

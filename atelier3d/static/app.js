@@ -527,10 +527,12 @@ pages.fichier = async (params, id) => {
             <button class="btn petit" id="poser">Poser un repère</button></div><div id="liste-reperes"></div></section>` : ""}</div>
         <div id="panneau-plan" hidden><div class="carte"><div class="actions" style="margin-bottom:10px">
           <button class="btn prim" id="plan-pdf">Télécharger le plan (PDF)</button><button class="btn" id="plan-png">PNG</button>
-          <button class="btn" id="plan-garder">Enregistrer le PDF dans le projet</button><button class="btn" id="plan-cartouche">Cartouche…</button></div>
+          <button class="btn" id="plan-garder">Enregistrer le PDF dans le projet</button><button class="btn" id="plan-cartouche">Cartouche…</button>
+          <button class="btn" id="plan-generer">Régénérer</button></div>
+          <div id="plan-etat" class="sous" style="margin-bottom:10px"></div>
           <div class="onglets" id="plan-feuilles" style="flex-wrap:wrap;margin-bottom:10px"></div>
           <div id="plan-controle" class="controle-plan" hidden></div>
-          <div id="plan-toile" class="plan-toile"><div class="vide">Génération du plan…</div></div></div></div>
+          <div id="plan-toile" class="plan-toile"><div class="vide">Chargement…</div></div></div></div>
         ${f.notes ? `<section class="carte"><h2>Notes</h2><div style="white-space:pre-wrap">${esc(f.notes)}</div></section>` : ""}
         <section class="carte"><h2>Historique d'impression</h2>${tableImpressions(f.impressions.map((i) => ({ ...i, machine_nom: machines.find((x) => x.id === i.machine_id)?.nom })), false)}</section>
       </div>
@@ -726,14 +728,53 @@ async function afficher(f, m) {
     zone.innerHTML = `<b>${c.complet ? "✓ Cotation complète" : "⚠ Cotation incomplète"}</b> · ${c.niveaux} niveaux cotés : chaque sommet de la pièce est donné par une cote ou par une forme indiquée (Ø, R, chanfrein).${details.length ? `<div class="sous">${details.join(" ")}</div>` : ""}`;
     zone.hidden = false;
   };
-  const genererPlan = async () => {
-    const { dessinerPlan } = await import("/static/plan.js");
-    feuilles = dessinerPlan(vue.visibles(), { reperes, formes: m.formes, cartouche: await infosCartouche() });
+  // Le plan n'est calculé que sur demande ; il est alors gardé sur le serveur et réaffiché tel quel ensuite.
+  // Sa clé résume tout ce dont il dépend (fichier, repères, formes, cartouche, réglages des plans, code du dessin) :
+  // si elle a changé, on le signale et on propose de le mettre à jour, sans recalcul d'office.
+  const empreinte = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(16); };
+  let cleCode = null;
+  const clePlan = async () => {
+    cleCode ??= empreinte((await Promise.all(["plan", "aretes", "traceur"].map((n) => fetch(`/static/${n}.js`).then((r) => r.text())))).join(""));
+    const r = (await reglages()).valeurs;
+    const regl = Object.keys(r).filter((k) => k.startsWith("plans.") && !/^plans\.(piece|apercu|ecran)\./.test(k)).sort().map((k) => [k, r[k]]);
+    return `${f.sha256}-${empreinte(JSON.stringify({ reperes, formes: m.formes || null, cartouche: await infosCartouche(), regl }))}-${cleCode}`;
+  };
+  const afficherFeuilles = async (liste) => {
+    feuilles = liste;
     $("#plan-feuilles").innerHTML = feuilles.length > 1 ? feuilles.map((t, i) => `<button data-feuille="${i}">Feuille ${i + 1} · ${esc(t.titre || "")}</button>`).join("") : "";
     $$("#plan-feuilles button").forEach((b) => (b.onclick = () => montrerFeuille(+b.dataset.feuille)));
-    afficherControle(feuilles[0].infos.controle);
+    afficherControle(feuilles[0].infos?.controle);
     await montrerFeuille(Math.min(courante, feuilles.length - 1));
   };
+  const etatPlan = (html, libelle) => { $("#plan-etat").innerHTML = html; $("#plan-generer").textContent = libelle; };
+  const genererPlan = async () => {
+    etatPlan("Calcul du plan…", "Régénérer");
+    await new Promise((ok) => setTimeout(ok, 20));   // laisser s'afficher le message
+    const { dessinerPlan } = await import("/static/plan.js");
+    const cle = await clePlan();
+    await afficherFeuilles(dessinerPlan(vue.visibles(), { reperes, formes: m.formes, cartouche: await infosCartouche() }));
+    try {
+      await api(`fichiers/${f.id}/plan`, { method: "PUT", body: { cle, feuilles: feuilles.map((F) => F.donnees()) } });
+      etatPlan(`Plan généré et enregistré le ${new Date().toLocaleString("fr-FR")} : il ne sera plus recalculé tant que la pièce ne change pas.`, "Régénérer");
+    } catch (e) { etatPlan(`Plan affiché mais non enregistré : ${esc(e.message)}`, "Régénérer"); }
+  };
+  const ouvrirPlan = async () => {
+    const garde = await api(`fichiers/${f.id}/plan`);
+    if (!garde.feuilles) {
+      feuilles = [];
+      $("#plan-toile").innerHTML = `<div class="vide">Pas encore de plan pour cette pièce. Il est calculé une fois, à la demande, puis gardé.<br><br><button class="btn prim" id="plan-premier">Générer le plan</button></div>`;
+      $("#plan-premier").onclick = () => genererPlan();
+      etatPlan("", "Générer le plan");
+      return;
+    }
+    const { Feuille } = await import("/static/traceur.js");
+    await afficherFeuilles(garde.feuilles.map((d) => Feuille.depuisDonnees(d)));
+    const quand = new Date(garde.cree).toLocaleString("fr-FR");
+    if (garde.cle === (await clePlan())) etatPlan(`Plan enregistré le ${quand} (réaffiché sans recalcul).`, "Régénérer");
+    else etatPlan(`<span class="pastille p-warn">à mettre à jour</span> la pièce, ses repères, le cartouche, les réglages ou le dessin ont changé depuis ce plan (${quand}).`, "Mettre à jour le plan");
+  };
+  $("#plan-generer").onclick = () => genererPlan();
+  const exigerPlan = () => { if (!feuilles.length) { toast("Génère d'abord le plan"); return false; } return true; };
   const pdfPlan = async () => {
     const { pdfDepuisFeuilles } = await import("/static/pdf.js");
     return pdfDepuisFeuilles(feuilles, { titre: sansExt });
@@ -758,7 +799,7 @@ async function afficher(f, m) {
     $("#panneau-3d").hidden = plan;
     $("#panneau-plan").hidden = !plan;
     $(".deux", page)?.classList.toggle("plan-large", plan);   // le plan prend toute la largeur
-    if (plan) await genererPlan();
+    if (plan) await ouvrirPlan();
   }));
   const telecharger = (href, nom) => {
     const a = document.createElement("a");
@@ -766,20 +807,29 @@ async function afficher(f, m) {
     a.download = nom;
     a.click();
   };
-  $("#plan-png").onclick = () => telecharger(feuilles[courante].rendreCanvas(200 / 25.4).toDataURL("image/png"), `plan-${sansExt}${feuilles.length > 1 ? "-feuille" + (courante + 1) : ""}.png`);
+  $("#plan-png").onclick = () => exigerPlan() && telecharger(feuilles[courante].rendreCanvas(200 / 25.4).toDataURL("image/png"), `plan-${sansExt}${feuilles.length > 1 ? "-feuille" + (courante + 1) : ""}.png`);
   $("#plan-pdf").onclick = async () => {
+    if (!exigerPlan()) return;
     const url = URL.createObjectURL(await pdfPlan());
     telecharger(url, `plan-${sansExt}.pdf`);
     setTimeout(() => URL.revokeObjectURL(url), 10000);
   };
   $("#plan-garder").onclick = async () => {
+    if (!exigerPlan()) return;
     const fd = new FormData();
     fd.append("fichiers", await pdfPlan(), `plan-${sansExt}.pdf`);
     fd.append("role", "plan"); fd.append("parent_id", f.id); fd.append("variante", "plan");
     await api(`projets/${f.projet_id}/fichiers`, { method: "POST", body: fd });
     toast("Plan enregistré dans le projet (Plans et documents)");
   };
-  if (new URLSearchParams(location.hash.split("?")[1] || "").has("plan")) $('[data-onglet="plan"]').click();
+  // #/fichier/<id>?plan : ouvre l'onglet Plan ; ?plan=generer : le (re)calcule aussitôt
+  const demande = new URLSearchParams(location.hash.split("?")[1] || "");
+  if (demande.has("plan")) {
+    $$("[data-onglet]").forEach((x) => x.classList.toggle("actif", x.dataset.onglet === "plan"));
+    $("#panneau-3d").hidden = true; $("#panneau-plan").hidden = false;
+    $(".deux", page)?.classList.add("plan-large");
+    if (demande.get("plan") === "generer") await genererPlan(); else await ouvrirPlan();
+  }
 }
 
 // ---- machines

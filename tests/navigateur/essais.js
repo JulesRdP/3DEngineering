@@ -92,6 +92,17 @@ await essai("traceur : rendu canvas à la bonne taille", () => {
 
 // ------------------------------------------------------------------ PDF
 
+await essai("traceur : feuille gardée en JSON puis relue, dessin identique", async () => {
+  const { feuilles } = await plan(q.get("v1"));
+  for (const F of feuilles) {
+    const relue = Feuille.depuisDonnees(JSON.parse(JSON.stringify(F.donnees())));
+    vrai(relue instanceof Feuille, "classe perdue");
+    egal(relue.rendreSVG(), F.rendreSVG(), "SVG différent après relecture");
+    egal([relue.titre, relue.largeur, relue.hauteur, relue.format], [F.titre, F.largeur, F.hauteur, F.format]);
+    egal(relue.infos.controle, F.infos.controle, "bilan du contrôle de cotation");
+  }
+});
+
 await essai("PDF : structure, formats des pages, caractères WinAnsi", async () => {
   const a = new Feuille("A3", "paysage"), b = new Feuille("A4", "portrait");
   a.segment(10, 10, 50, 50, { motif: "interrompu" }); a.texte(30, 30, "Ø22,8 ± 0,1 – 45°");

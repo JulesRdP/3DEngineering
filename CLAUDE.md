@@ -55,6 +55,12 @@ réglages `vue3d.*`, choix de la barre retenu par navigateur (localStorage). Éc
     Une ou deux feuilles (`choisirMiseEnPage`) : deux si l'échelle y gagne (face + coupe, puis vue de dessus
     désignée par flèche de référence + iso).
   - `traceur.js` : primitives en mm (feuille), rendu SVG (aperçu) et canvas (PNG) ; `pdf.js` : PDF vectoriel.
+    `Feuille.donnees()` / `Feuille.depuisDonnees()` : une feuille est de la donnée pure (JSON).
+  - Plan sur demande, puis gardé : l'onglet Plan ne calcule rien ; « Générer le plan » (ou `#/fichier/<id>?plan=generer`)
+    le calcule et l'envoie à `PUT /api/fichiers/{id}/plan` (`data/plans/<id>.json`), réaffiché ensuite tel quel.
+    Sa clé (app.js, `clePlan`) = empreinte du fichier + repères, formes, cartouche, réglages `plans.*` (hors animation /
+    aperçu / écran) et du code de `plan.js`, `aretes.js`, `traceur.js` : si elle diffère, le plan est marqué
+    « à mettre à jour » sans être recalculé d'office. Modifier le dessin invalide donc les plans gardés tout seul.
   - `visionneuse.js` : aperçu SVG, zoom molette autour du curseur (`zoomAutour`), déplacement, plein écran,
     vues cliquables (`vueSous`, d'après `feuille.infos.vues` rempli par plan.js : rect, ox, oy, s, f, u, r, coupe).
   - `apparition3d.js` : pièce 3D posée sous la vue cliquée (caméra orthographique calée sur la projection
