@@ -153,6 +153,8 @@ def _crud(table, ordre="id DESC", sortie=lambda x: x, apres=None):
         vals = _filtrer(table, corps)
         if table == "projets":
             vals.update(cree=maintenant(), modifie=maintenant())
+        if table == "impressions":
+            _verifier_volume(vals)
         ident = db.inserer(table, vals)
         if apres:
             apres(ident)
@@ -166,6 +168,8 @@ def _crud(table, ordre="id DESC", sortie=lambda x: x, apres=None):
             vals.pop("code_acces", None)  # champ laissé vide = on garde l'ancien code
         if table == "projets":
             vals["modifie"] = maintenant()
+        if table == "impressions":
+            _verifier_volume({**_existe(table, ident), **vals})
         db.modifier(table, ident, vals)
         if apres:
             apres(ident)
@@ -295,6 +299,7 @@ def lancer_impression(ident: int):
     i = _existe("impressions", ident)
     if i["resultat"] != "prevue":
         raise HTTPException(400, "seule une impression prévue peut être lancée")
+    _verifier_volume({**i, "resultat": "en_cours"})
     db.modifier("impressions", ident, {"resultat": "en_cours", "debut": maintenant()})
     _apres_impression(ident)
     return _existe("impressions", ident)
@@ -446,8 +451,11 @@ async def televerser(ident: int, fichiers: list[UploadFile] = File(...), role: s
 @app.get("/api/fichiers")
 def tous_fichiers():
     """Liste courte de tous les fichiers (pour les menus de choix)."""
-    return db.tous("""SELECT f.id, f.nom, f.type, f.role, f.variante, f.projet_id, p.nom AS projet
-                      FROM fichiers f JOIN projets p ON p.id = f.projet_id ORDER BY p.nom, f.nom""")
+    lignes = db.tous("""SELECT f.id, f.nom, f.type, f.role, f.variante, f.projet_id, p.nom AS projet, f.meta
+                        FROM fichiers f JOIN projets p ON p.id = f.projet_id ORDER BY p.nom, f.nom""")
+    for f in lignes:
+        f["dimensions"] = (f.pop("meta") or {}).get("dimensions")
+    return lignes
 
 
 @app.get("/api/fichiers/{ident}")
@@ -568,6 +576,33 @@ def estimer_grammes(meta, densite=1.24, remplissage=15, parois=2):
     return round((coque + (vol - coque) * remplissage / 100) * densite / 1000, 1)
 
 
+def _verdict_volume(dims, vol):
+    """La pièce (dimensions x, y, z en mm) rentre-t-elle dans ce volume d'impression, en la tournant si besoin ?"""
+    if not dims or None in vol:
+        return "inconnu", "volume d'impression non renseigné" if dims else "pièce pas encore analysée"
+    if all(d <= v for d, v in zip(dims, vol)):
+        return "ok", "rentre telle quelle"
+    if all(d <= v for d, v in zip(sorted(dims), sorted(vol))):
+        return "tourner", "rentre en la faisant pivoter"
+    return "trop_grand", "dépasse le volume d'impression"
+
+
+def _verifier_volume(impression):
+    """Refuse une impression prévue ou en cours dont la pièce ne rentre pas dans la machine choisie.
+    Volume non renseigné ou pièce non analysée : on laisse passer (on ne sait pas)."""
+    if impression.get("resultat") not in ("prevue", "en_cours") or not impression.get("machine_id") or not impression.get("fichier_id"):
+        return
+    m = db.un("SELECT * FROM machines WHERE id = ?", (impression["machine_id"],))
+    f = db.un("SELECT meta FROM fichiers WHERE id = ?", (impression["fichier_id"],))
+    if not m or not f:
+        return
+    dims = (f["meta"] or {}).get("dimensions")
+    vol = [m["volume_x"], m["volume_y"], m["volume_z"]]
+    if _verdict_volume(dims, vol)[0] == "trop_grand":
+        mm = lambda xs: "×".join(f"{x:g}" for x in xs)
+        raise HTTPException(400, f"la pièce ({mm(dims)} mm) ne rentre pas dans {m['nom']} ({mm(vol)} mm), même en la tournant")
+
+
 @app.get("/api/fichiers/{ident}/compatibilite")
 def compatibilite(ident: int):
     """Pour chaque machine : la pièce rentre-t-elle (en la tournant si besoin) ? + estimation matière et coût."""
@@ -577,14 +612,7 @@ def compatibilite(ident: int):
     res = {"dimensions": dims, "machines": [], "estimation": []}
     for m in db.tous(f"SELECT * FROM machines ORDER BY {ORDRE_MACHINES}"):
         vol = [m["volume_x"], m["volume_y"], m["volume_z"]]
-        if not dims or None in vol:
-            verdict, detail = "inconnu", "volume d'impression non renseigné" if dims else "pièce pas encore analysée"
-        elif all(d <= v for d, v in zip(dims, vol)):
-            verdict, detail = "ok", "rentre telle quelle"
-        elif all(d <= v for d, v in zip(sorted(dims), sorted(vol))):
-            verdict, detail = "tourner", "rentre en la faisant pivoter"
-        else:
-            verdict, detail = "trop_grand", "dépasse le volume d'impression"
+        verdict, detail = _verdict_volume(dims, vol)
         res["machines"].append({"id": m["id"], "nom": m["nom"], "volume": vol, "verdict": verdict, "detail": detail})
     for fil in db.tous("SELECT * FROM filaments ORDER BY matiere"):
         g = estimer_grammes(meta, fil["densite"] or 1.24)

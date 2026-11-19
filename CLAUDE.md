@@ -40,6 +40,8 @@ Variables : `HOTE`, `PORT` (lancement), `ATELIER3D_DONNEES` (dossier des donnée
 - `atelier3d/machines.py` : un pilote par machine (`PiloteBambu` MQTT TLS, `PiloteMoonraker` HTTP,
   `PiloteManuel`), gérés par `Parc`, resynchronisé à chaque modification d'une machine. Adresse Bambu = `IP` ou
   `IP:port`. Une machine `manuel` passe seule en « occupée » / « libre » selon ses impressions en cours.
+  Impression prévue / en cours refusée si la pièce ne rentre pas dans la machine (`_verifier_volume`, même règle
+  que la compatibilité : rotations permises, volume inconnu = accepté).
   Image d'une machine, par priorité : sa photo (`data/machines/<id>.<ext>`, `/api/machines/{id}/photo`), sinon
   l'image de son modèle (`data/modeles/<marque-modele>.<ext>`, `/api/modeles/{cle}/image`, clé = `cle_modele`,
   ex. `bambu-lab-a1`), adresse dans le champ `photo` renvoyé avec la machine ; affichée sur vignette claire

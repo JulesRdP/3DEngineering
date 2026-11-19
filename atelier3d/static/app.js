@@ -419,10 +419,10 @@ async function lancerImpression(f, compat) {
   const [machines, filaments] = await Promise.all([api("machines"), api("filaments")]);
   const derniere = f.impressions.find((i) => i.machine_id || i.filament_id) || {};
   const compatible = compat.machines.find((c) => c.verdict === "ok" || c.verdict === "tourner");
-  const machine_id = derniere.machine_id || compatible?.id || machines[0]?.id;
+  const verdict = (id) => compat.machines.find((c) => c.id === id)?.verdict;
+  const machine_id = (verdict(derniere.machine_id) !== "trop_grand" && derniere.machine_id) || compatible?.id || machines.find((m) => verdict(m.id) !== "trop_grand")?.id;
   const filament_id = derniere.filament_id || compat.estimation[0]?.filament_id;
   const estimation = (fid) => compat.estimation.find((e) => String(e.filament_id) === String(fid))?.grammes;
-  const verdict = (id) => compat.machines.find((c) => c.id === id)?.verdict;
   const r = await formulaire({
     titre: "Lancer une impression", valider: "Lancer maintenant",
     valeurs: { machine_id, filament_id, quantite: 1, grammes: f.meta?.reglages_3mf?.poids_estime_g || estimation(filament_id) },
@@ -1132,13 +1132,16 @@ function directMachine(m, e = {}, enCours = null) {
 
 // Lancer une impression sur cette machine (machine sans connexion) : choix de la pièce, filament repris d'avant.
 async function lancerSurMachine(m, fichiers, filaments, siennes) {
+  const vol = [m.volume_x, m.volume_y, m.volume_z];
+  const tri = (xs) => [...xs].sort((a, b) => a - b);
+  const tropGrande = (f) => { const d = f.dimensions; return d && !vol.includes(null) && tri(d).some((x, i) => x > tri(vol)[i]); };
   const pieces = fichiers.filter((f) => ["piece", "gcode"].includes(f.role));
   const derniere = siennes[0] || {};
   const r = await formulaire({
     titre: `Lancer une impression sur ${m.nom}`, valider: "Lancer maintenant",
     valeurs: { fichier_id: derniere.fichier_id, filament_id: derniere.filament_id, quantite: 1 },
     champs: [
-      { k: "fichier_id", l: "Pièce", t: "select", large: true, options: [["", "—"], ...pieces.map((f) => [f.id, `${f.projet} / ${f.nom}${f.variante ? " (" + f.variante + ")" : ""}`])] },
+      { k: "fichier_id", l: "Pièce", t: "select", large: true, options: [["", "—"], ...pieces.map((f) => [f.id, `${f.projet} / ${f.nom}${f.variante ? " (" + f.variante + ")" : ""}${tropGrande(f) ? " (trop grande)" : ""}`])] },
       { k: "filament_id", l: "Filament", t: "select", options: [["", "—"], ...filaments.map((x) => [x.id, `${x.matiere} ${x.marque} ${x.couleur}`.trim()])] },
       { k: "quantite", l: "Quantité", t: "number", pas: 1 },
       { k: "grammes", l: "Filament (g / pièce)", t: "number", aide: "estimé d'après la pièce ; retiré du stock à la fin" },

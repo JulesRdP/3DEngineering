@@ -106,6 +106,29 @@ def test_compatibilite_rotation_et_estimation(client):
     assert e["grammes"] > 0 and e["cout"] > 0 and e["stock_suffisant"] is False
 
 
+def test_impression_refusee_si_la_piece_ne_rentre_pas(client):
+    p = client.post("/api/projets", json={"nom": "T"}).json()
+    petite = client.post("/api/machines", json={"nom": "Petite", "volume_x": 40, "volume_y": 40, "volume_z": 40}).json()
+    grande = client.post("/api/machines", json={"nom": "Grande", "volume_x": 70, "volume_y": 70, "volume_z": 50}).json()
+    inconnue = client.post("/api/machines", json={"nom": "Sans volume"}).json()
+    f = deposer(client, p["id"], "support.stl", NEMA_V1.read_bytes())          # 60 × 50 × 56
+    imp = lambda m, r="en_cours": {"fichier_id": f["id"], "machine_id": m["id"], "resultat": r}
+    r = client.post("/api/impressions", json=imp(petite))
+    assert r.status_code == 400 and "ne rentre pas dans Petite" in r.json()["detail"]
+    assert client.post("/api/impressions", json=imp(petite, "prevue")).status_code == 400
+    assert client.post("/api/impressions", json=imp(petite, "reussie")).status_code == 200    # historique : libre
+    assert client.post("/api/impressions", json=imp(inconnue)).status_code == 200             # on ne sait pas
+    i = client.post("/api/impressions", json=imp(grande, "prevue")).json()                    # rentre en tournant
+    assert client.put(f"/api/impressions/{i['id']}", json={"machine_id": petite["id"]}).status_code == 400
+    # une impression prévue sur la petite (avant que le volume soit connu) ne peut pas être lancée
+    client.put(f"/api/machines/{petite['id']}", json={"volume_x": None})
+    j = client.post("/api/impressions", json=imp(petite, "prevue")).json()
+    client.put(f"/api/machines/{petite['id']}", json={"volume_x": 40})
+    assert client.post(f"/api/impressions/{j['id']}/lancer").status_code == 400
+    assert client.post(f"/api/impressions/{i['id']}/lancer").status_code == 200
+    assert len(client.get("/api/fichiers").json()[0]["dimensions"]) == 3     # pour marquer « trop grande »
+
+
 def test_reperes_validation(client):
     p = client.post("/api/projets", json={"nom": "R"}).json()
     f = deposer(client, p["id"], "c.stl", cube_stl())

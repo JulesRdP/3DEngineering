@@ -20,7 +20,8 @@ Les données (base SQLite + fichiers + miniatures) sont dans `data/`. Sauvegarde
   (pièces, plans, sources, G-code, photos), arbre des variations.
 - **Fichiers** : dimensions, volume, surface, triangles et miniature calculés au dépôt. Pour un 3MF de
   Bambu Studio / OrcaSlicer : imprimante, profils, couche, remplissage, durée et poids estimés.
-  « Sur quelles machines ? » compare la pièce au volume de chaque imprimante (rentre / à tourner / trop grand).
+  « Sur quelles machines ? » compare la pièce au volume de chaque imprimante (rentre / à tourner / trop grand). Une impression prévue ou lancée sur une machine trop petite est refusée
+  (machine sans volume renseigné : on laisse passer).
   Estimation matière et coût par filament.
 - **Repères et plans** : dans la vue 3D d'une pièce, « Poser un repère » puis clic sur la pièce pour numéroter une
   zone (nom + réglage). L'onglet « Plan » produit un dessin de définition selon les normes du dessin industriel :
