@@ -199,3 +199,26 @@ def test_interface_suivi_impression_en_un_clic(serveur):
     finally:
         with httpx.Client(base_url=base, timeout=30) as c:
             c.delete(f"/api/impressions/{i['id']}"); c.delete(f"/api/impressions/{p['id']}"); c.delete(f"/api/machines/{m['id']}")
+
+
+def test_interface_machines_cartes_et_page(serveur):
+    """Machines : une carte par imprimante (dessin selon le modèle, nom, modèle, état) qui ouvre sa page ;
+    la page montre l'état en direct, l'historique, les statistiques et les caractéristiques."""
+    base, _ = serveur
+    with httpx.Client(base_url=base, timeout=30) as c:
+        a1 = c.post("/api/machines", json={"nom": "A1 essai", "marque": "Bambu Lab", "modele": "A1 mini", "pilote": "bambu_lan"}).json()
+        ko = c.post("/api/machines", json={"nom": "Kobra essai", "marque": "Anycubic", "modele": "Kobra 3", "statut_manuel": "maintenance"}).json()
+    try:
+        dom = page(f"{base}/#/machines", budget_ms=8000)
+        for m in (a1, ko):
+            carte = re.search(rf'<a class="carte-imp" href="#/machine/{m["id"]}"[\s\S]*?</a>', dom)
+            assert carte, f"carte de {m['nom']} absente ou pas cliquable"
+            assert "imp-dessin" in carte.group(0) and m["nom"] in carte.group(0)
+        assert "Bambu Lab A1 mini" in dom and "Anycubic Kobra 3" in dom and "Maintenance" in dom and "À configurer" in dom
+        dom = page(f"{base}/#/machine/{ko['id']}", budget_ms=8000)
+        for texte in ["Kobra essai", "En ce moment", "Historique", "Statistiques", "Caractéristiques", "Lancer une impression", 'data-statut="libre"']:
+            assert texte in dom, texte
+        assert 'id="vignette"' in dom and "imp-dessin" in dom
+    finally:
+        with httpx.Client(base_url=base, timeout=30) as c:
+            c.delete(f"/api/machines/{a1['id']}"); c.delete(f"/api/machines/{ko['id']}")

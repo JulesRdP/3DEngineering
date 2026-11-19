@@ -207,9 +207,63 @@ tr.cliquable { cursor: pointer; } tr.cliquable:hover td { background: var(--surf
 dl.infos { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0; font-size: 13px; }
 dl.infos dt { color: var(--muted); } dl.infos dd { margin: 0; font-family: var(--mono); overflow-wrap: anywhere; }
 
-/* ---- machines */
-.machine .tete { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
-.machine h3 { margin: 0; font-size: 15px; }
+/* ---- machines : cartes, page d'une machine, dessins (imprimantes.js) */
+.grille-imp { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+.carte-imp { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  overflow: hidden; text-decoration: none; color: inherit; transition: border-color .15s, box-shadow .15s, transform .15s; }
+.carte-imp:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); box-shadow: var(--ombre); transform: translateY(-1px); }
+.carte-imp .vignette, .grande-vignette { position: relative; display: grid; place-items: center; height: 150px; padding: 12px;
+  background: radial-gradient(ellipse at 50% 30%, var(--surface) 0%, var(--surface2) 75%); border-bottom: 1px solid var(--line); }
+.carte-imp .vignette .pastille { position: absolute; top: 10px; right: 10px; }
+.carte-imp .corps { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 2px; }
+.carte-imp h3 { margin: 0; font-size: 15px; }
+.carte-imp .modele { color: var(--muted); font-size: 12.5px; }
+.carte-imp .detail, #direct .detail { color: var(--muted); font-size: 12.5px; font-family: var(--mono); min-height: 1em; }
+.carte-imp .jauge { margin: 6px 0 4px; }
+.travail { display: flex; justify-content: space-between; gap: 8px; margin-top: 8px; font-size: 13px; }
+.travail span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.travail.grand { font-size: 15px; margin-top: 0; } .travail.grand b { font-size: 20px; font-variant-numeric: tabular-nums; }
+.jauge.grande { height: 12px; }
+.imp-dessin { width: auto; max-width: 100%; overflow: visible; }
+.carte-imp .vignette .imp-dessin { height: 124px; } .grande-vignette .imp-dessin { height: 184px; }
+.carte-imp .vignette, .grande-vignette { overflow: hidden; }
+.imp-photo { width: 100%; height: 100%; object-fit: cover; border-radius: 6px; }
+.tete-imp { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 22px; align-items: center; margin-bottom: 18px; }
+.tete-imp h1 { margin: 0; }
+.grande-vignette { height: 210px; border: 1px solid var(--line); border-radius: var(--radius); }
+@media (max-width: 700px) { .tete-imp { grid-template-columns: 1fr; } }
+.pastille.grande { font-size: 13px; padding: 4px 10px; }
+.temps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+.temp-bloc { background: var(--surface2); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; }
+.temp-bloc span { color: var(--muted); font-size: 12px; } .temp-bloc b { font-size: 20px; font-variant-numeric: tabular-nums; }
+.temp-bloc small { color: var(--muted); font-family: var(--mono); font-size: 11.5px; }
+.chiffres.mini { margin: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.chiffres.mini .chiffre { background: var(--surface2); border: 0; }
+.segments { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.segments button { border: 0; background: var(--surface); padding: 6px 12px; cursor: pointer; color: var(--muted); }
+.segments button + button { border-left: 1px solid var(--line); }
+.segments button.actif { background: var(--surface2); color: var(--fg); font-weight: 600; }
+
+.imp-dessin { --imp-corps: #3b423e; --imp-clair: #59615c; --imp-fond: #1f2422; --imp-plateau: #2a2e2c; }
+@media (prefers-color-scheme: dark) { .imp-dessin { --imp-corps: #4a524d; --imp-clair: #6d7671; --imp-fond: #121513; --imp-plateau: #1c1f1d; } }
+.imp-socle, .imp-montant, .imp-bras, .imp-caisse { fill: var(--imp-corps); }
+.imp-interieur { fill: var(--imp-fond); }
+.imp-rail { fill: var(--imp-clair); }
+.imp-plateau { fill: var(--imp-plateau); } .imp-plateau-lisere { fill: #c4a36b; opacity: .8; }
+.imp-tete rect:first-child { fill: var(--imp-clair); } .imp-tete-face { fill: var(--imp-fond); }
+.imp-buse { fill: #b8955c; } .imp-buse.chaude { fill: #ff8a3d; }
+.imp-lueur { fill: #ff6a2a; opacity: .45; animation: imp-lueur 1.6s ease-in-out infinite; }
+.imp-piece { fill: var(--accent); }
+.imp-vitre { fill: color-mix(in srgb, #9fc3d6 16%, transparent); stroke: color-mix(in srgb, #ffffff 18%, transparent); stroke-width: .8; }
+.imp-reflet { fill: #ffffff; opacity: .07; }
+.imp-cadre { fill: none; stroke: var(--imp-corps); stroke-width: 4; stroke-linecap: round; }
+.imp-ecran { fill: #0b0d0c; }
+.imp-voyant { fill: var(--muted); } .v-ok { fill: var(--ok); } .v-info { fill: var(--info); } .v-warn { fill: var(--warn); } .v-bad { fill: var(--bad); }
+.imp-bobine circle { fill: var(--imp-clair); } .imp-bobine .imp-bobine-fil { fill: var(--accent); opacity: .75; }
+.imp-dessin.en-impression .imp-tete { animation: imp-va-et-vient 2.4s ease-in-out infinite; }
+@keyframes imp-va-et-vient { 0%, 100% { transform: translateX(-7px); } 50% { transform: translateX(7px); } }
+@keyframes imp-lueur { 0%, 100% { opacity: .25; } 50% { opacity: .6; } }
+@media (prefers-reduced-motion: reduce) { .imp-dessin .imp-tete, .imp-lueur { animation: none; } }
 .jauge { height: 8px; border-radius: 99px; background: var(--surface2); overflow: hidden; margin: 10px 0 6px; }
 .jauge i { display: block; height: 100%; background: var(--accent); transition: width .5s; }
 .temp { display: flex; gap: 14px; font-family: var(--mono); font-size: 12.5px; color: var(--muted); margin-top: 6px; flex-wrap: wrap; }

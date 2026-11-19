@@ -48,7 +48,10 @@ Les données (base SQLite + fichiers + miniatures) sont dans `data/`. Sauvegarde
   PDF vectoriel téléchargeable ou rangé dans « Plans et documents » du projet. Après une mise à jour, lancer
   `outils.reanalyser` pour les fichiers déjà déposés.
 - **Aperçu 3D du projet** : toutes les pièces dans une même scène, dans leur position CAO (dernières versions cochées).
-- **Machines** : pilote `bambu_lan` (MQTT TLS port 8883, IP + numéro de série + code d'accès), `moonraker`
+- **Machines** : une carte par imprimante (dessin du modèle ou photo déposée, nom, modèle, état en direct) ; un clic
+  ouvre sa page : impression en cours (progression, couches, températures), pause / reprise / arrêt, lancer une
+  impression et changer l'état d'une machine sans connexion, historique, statistiques, caractéristiques, presets.
+  Pilote `bambu_lan` (MQTT TLS port 8883, IP + numéro de série + code d'accès), `moonraker`
   (Klipper) ou `manuel`. Pause / reprise / arrêt depuis l'appli.
 - **Filaments** : stock en grammes, déduit automatiquement quand une impression est notée réussie ou ratée.
 - **Presets** : réglages éprouvés par couple machine × filament, copiables en fiche texte.

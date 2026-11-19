@@ -1,4 +1,5 @@
 // Atelier 3D : interface (page unique, routes dans le #hash).
+import { imageMachine } from "/static/imprimantes.js";
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -63,6 +64,12 @@ const ETATS_MACHINE = {
   libre: "p-ok", terminee: "p-ok", impression: "p-info", preparation: "p-info", pause: "p-warn", occupee: "p-info",
   maintenance: "p-warn", erreur: "p-bad", hors_service: "p-bad",
 };
+const LIBELLES_ETAT = {
+  libre: "Libre", terminee: "Terminée", impression: "En impression", preparation: "Préparation", pause: "En pause", occupee: "Occupée",
+  maintenance: "Maintenance", erreur: "Erreur", hors_service: "Hors service", incomplete: "À configurer", deconnectee: "Déconnectée",
+  "connexion...": "Connexion…", connectee: "Connectée", manuel: "Manuel", inconnu: "Inconnu", inconnue: "Inconnu", "arret demande": "Arrêt demandé",
+};
+const libelleEtat = (e) => LIBELLES_ETAT[e] || String(e || "inconnu").replace(/_/g, " ");
 const ROLES = { piece: "Pièces à imprimer", plan: "Plans et documents", source: "Sources CAO", gcode: "Fichiers tranchés", photo: "Photos", autre: "Autres" };
 const pastille = (paire) => `<span class="pastille ${paire[1]}">${esc(paire[0])}</span>`;
 
@@ -287,7 +294,7 @@ pages[""] = async () => {
     </div>
     <div class="deux">
       <div class="pile">
-        <section class="carte"><h2>Machines</h2><div class="grille" id="cartes-machines">${machines.length ? "" : `<div class="vide">Aucune machine. <a href="#/machines">Ajouter une imprimante</a></div>`}</div></section>
+        <section class="carte"><h2>Machines</h2><div class="grille-imp" id="cartes-machines">${machines.length ? "" : `<div class="vide">Aucune machine. <a href="#/machines">Ajouter une imprimante</a></div>`}</div></section>
         <section class="carte"><h2>Dernières impressions</h2>${tableImpressions(t.recentes)}</section>
       </div>
       <div class="pile">
@@ -299,28 +306,46 @@ pages[""] = async () => {
     </div>`;
   $("[data-nouv-imp]").onclick = async () => editer("impressions", await champsImpression(), null, () => route());
   const enCoursSur = (m) => t.a_imprimer.find((i) => i.machine_id === m.id && i.resultat === "en_cours");
-  const rendreMachines = (etats) => { if (machines.length) $("#cartes-machines").innerHTML = machines.map((m) => carteMachine(m, etats[m.id], enCoursSur(m))).join(""); };
+  const rendreMachines = (etats) => { if (machines.length) majCartesMachines($("#cartes-machines"), machines, etats, enCoursSur); };
   rendreMachines(etats);
   minuterie = setInterval(async () => rendreMachines(await api("etat-machines")), 4000);
 };
 
+// ---- imprimantes : carte (dessin ou photo, nom, modèle, état) ; un clic ouvre la page de la machine
+const volumeTexte = (m) => (m.volume_x ? `${nb(m.volume_x, 0)} × ${nb(m.volume_y, 0)} × ${nb(m.volume_z, 0)} mm` : "volume non renseigné");
+const detailImpression = (e) => [e.reste_min ? "reste " + duree(e.reste_min) : "", e.couche ? `couche ${e.couche} / ${e.couches}` : ""].filter(Boolean).join(" · ");
+const etatDe = (m, e = {}) => e.etat || e.connexion || "inconnu";
+
 function carteMachine(m, e = {}, imp = null) {
-  const etat = e.etat || e.connexion || "inconnu";
+  return `<a class="carte-imp" href="#/machine/${m.id}" data-machine="${m.id}">
+    <div class="vignette">${vignetteMachine(m, e)}</div>
+    <div class="corps">${corpsCarteMachine(m, e, imp)}</div></a>`;
+}
+const vignetteMachine = (m, e = {}) => `${imageMachine(m, e)}<span class="pastille ${ETATS_MACHINE[etatDe(m, e)] || "p-neutre"}">${esc(libelleEtat(etatDe(m, e)))}</span>`;
+function corpsCarteMachine(m, e = {}, imp = null) {
   const enCours = ["impression", "pause", "preparation"].includes(e.etat);
-  const vol = m.volume_x ? `${nb(m.volume_x, 0)} × ${nb(m.volume_y, 0)} × ${nb(m.volume_z, 0)} mm` : "volume non renseigné";
-  return `<div class="carte machine">
-    <div class="tete"><div><h3>${esc(m.nom)}</h3><div class="sous">${esc(m.marque)} ${esc(m.modele)} · ${vol}</div></div>
-    <span class="pastille ${ETATS_MACHINE[etat] || "p-neutre"}">${esc(etat.replace("_", " "))}</span></div>
-    ${enCours ? `<div class="jauge"><i style="width:${e.progression || 0}%"></i></div>
-      <div style="font-size:13px">${esc(e.travail || "")} · ${e.progression ?? 0} %${e.reste_min ? " · reste " + duree(e.reste_min) : ""}${e.couche ? ` · couche ${e.couche}/${e.couches}` : ""}</div>` : ""}
-    ${e.temp_buse !== undefined ? `<div class="temp"><span>buse ${nb(e.temp_buse, 0)}/${nb(e.consigne_buse, 0)} °C</span><span>plateau ${nb(e.temp_plateau, 0)}/${nb(e.consigne_plateau, 0)} °C</span></div>` : ""}
-    ${imp && m.pilote === "manuel" ? `<div class="imp-manuelle"><span>${esc(imp.fichier_nom || "impression")}${imp.debut ? ` · depuis ${heure(imp.debut)}` : ""}</span>${boutonsSuivi(imp)}</div>` : ""}
-    ${e.message ? `<div class="sous" style="margin-top:6px">${esc(e.message)}</div>` : ""}
-    ${e.code_erreur ? `<div class="pastille p-bad" style="margin-top:6px">erreur ${esc(e.code_erreur)}</div>` : ""}
-    ${enCours && m.pilote !== "manuel" ? `<div class="actions" style="margin-top:10px">
-      ${e.etat === "pause" ? `<button class="btn petit" data-cmd="reprendre" data-id="${m.id}">Reprendre</button>` : `<button class="btn petit" data-cmd="pause" data-id="${m.id}">Pause</button>`}
-      <button class="btn petit danger" data-cmd="arreter" data-id="${m.id}">Arrêter</button></div>` : ""}
-  </div>`;
+  const modele = [m.marque, m.modele].filter(Boolean).join(" ") || "Modèle non renseigné";
+  return `<h3>${esc(m.nom)}</h3><div class="modele">${esc(modele)}</div>
+    ${enCours ? `<div class="travail"><span>${esc(e.travail || "Impression")}</span><b>${e.progression ?? 0} %</b></div>
+      <div class="jauge"><i style="width:${e.progression || 0}%"></i></div>
+      <div class="detail">${detailImpression(e)}</div>`
+    : imp ? `<div class="imp-manuelle"><span>${esc(imp.fichier_nom || "Impression")}${imp.debut ? ` · depuis ${heure(imp.debut)}` : ""}</span>${boutonsSuivi(imp)}</div>`
+    : `<div class="detail">${e.message ? esc(e.message) : esc(volumeTexte(m))}</div>`}
+    ${e.code_erreur ? `<div class="pastille p-bad" style="margin-top:6px">erreur ${esc(e.code_erreur)}</div>` : ""}`;
+}
+// Met les cartes à jour sans tout redessiner (le dessin n'est remplacé que s'il change : animations fluides).
+function majCartesMachines(conteneur, machines, etats, enCoursSur = () => null) {
+  if (!conteneur.querySelector("[data-machine]")) {
+    conteneur.innerHTML = machines.map((m) => carteMachine(m, etats[m.id], enCoursSur(m))).join("");
+    return;
+  }
+  for (const m of machines) {
+    const carte = conteneur.querySelector(`[data-machine="${m.id}"]`);
+    if (!carte) continue;
+    const v = vignetteMachine(m, etats[m.id]), c = corpsCarteMachine(m, etats[m.id], enCoursSur(m));
+    if (carte.dataset.v !== v) { $(".vignette", carte).innerHTML = v; carte.dataset.v = v; }
+    if (carte.dataset.c !== c) { $(".corps", carte).innerHTML = c; carte.dataset.c = c; }
+  }
 }
 
 document.addEventListener("click", async (ev) => {
@@ -900,22 +925,156 @@ async function afficher(f, m) {
 
 // ---- machines
 pages.machines = async () => {
-  const [machines, etats] = await Promise.all([api("machines"), api("etat-machines")]);
+  const [machines, etats, imp] = await Promise.all([api("machines"), api("etat-machines"), api("impressions")]);
+  const enCoursSur = (m) => imp.find((i) => i.machine_id === m.id && i.resultat === "en_cours");
   page.innerHTML = `
-    <div class="entete"><div><h1>Machines</h1><div class="sous">État en direct des imprimantes connectées (Bambu réseau local, Klipper)</div></div>
+    <div class="entete"><div><h1>Machines</h1><div class="sous">${machines.length} imprimante${machines.length > 1 ? "s" : ""} · clic sur une machine pour l'ouvrir</div></div>
       <div class="actions"><button class="btn prim" id="nouv">Ajouter une machine</button></div></div>
-    <div class="grille" id="cartes"></div>
+    <div class="grille-imp" id="cartes">${machines.length ? "" : `<div class="vide">Aucune machine</div>`}</div>
     <section class="carte" style="margin-top:18px"><h2>Connecter une Bambu Lab</h2><div class="sous">Sur l'écran de l'imprimante : Réglages → Réseau → activer le mode « LAN » ou noter l'IP et le code d'accès.
       Le numéro de série est dans Réglages → Appareil (ou sur l'étiquette au dos). Le PC qui fait tourner l'atelier doit être sur le même réseau.
       Les Anycubic d'origine n'ont pas d'API locale ouverte : elles restent en état manuel, sauf si elles tournent sous Klipper (Rinkhals).</div></section>`;
-  const rendre = (etats) => {
-    $("#cartes").innerHTML = machines.map((m) => `<div>${carteMachine(m, etats[m.id])}<div class="actions" style="margin-top:6px"><button class="btn petit" data-modif="${m.id}">Modifier</button></div></div>`).join("") || `<div class="vide">Aucune machine</div>`;
-    $$("[data-modif]").forEach((b) => (b.onclick = () => editer("machines", champsMachine(), machines.find((x) => x.id == b.dataset.modif), () => route())));
-  };
+  const rendre = (etats) => machines.length && majCartesMachines($("#cartes"), machines, etats, enCoursSur);
   rendre(etats);
-  $("#nouv").onclick = () => editer("machines", champsMachine(), null, () => route());
+  $("#nouv").onclick = () => editer("machines", champsMachine(), null, (m) => { if (m?.id) location.hash = "#/machine/" + m.id; else route(); });
   minuterie = setInterval(async () => rendre(await api("etat-machines")), 3000);
 };
+
+// ---- une machine : en ce moment, commandes, historique, statistiques, caractéristiques
+pages.machine = async (params, id) => {
+  const [m, etats, imp, fichiers, presets, filaments] = await Promise.all([api("machines/" + id), api("etat-machines"), api("impressions"),
+    api("fichiers"), api("presets"), api("filaments")]);
+  const nomFichier = (fid) => fichiers.find((f) => f.id === fid)?.nom;
+  const nomFil = (fid) => { const f = filaments.find((x) => x.id === fid); return f ? `${f.matiere} ${f.marque} ${f.couleur}`.trim() : "–"; };
+  const siennes = imp.filter((i) => i.machine_id === m.id).map((i) => ({ ...i, fichier_nom: nomFichier(i.fichier_id), machine_nom: m.nom }));
+  const finies = siennes.filter((i) => ["reussie", "ratee"].includes(i.resultat));
+  const reussite = finies.length ? Math.round((100 * finies.filter((i) => i.resultat === "reussie").length) / finies.length) : null;
+  const heures = finies.reduce((t, i) => t + (i.duree_min || 0), 0) / 60;
+  const grammes = finies.reduce((t, i) => t + (i.grammes || 0) * (i.quantite || 1), 0);
+  const connexion = { bambu_lan: "Bambu Lab réseau local", moonraker: "Klipper / Moonraker", manuel: "Aucune (état manuel)" }[m.pilote] || m.pilote;
+  const sesPresets = presets.filter((p) => p.machine_id === m.id);
+  page.innerHTML = `
+    <div class="fil"><a href="#/machines">Machines</a> /</div>
+    <div class="tete-imp">
+      <div class="grande-vignette" id="vignette"></div>
+      <div class="tete-imp-texte">
+        <h1>${esc(m.nom)}</h1>
+        <div class="sous">${esc([m.marque, m.modele].filter(Boolean).join(" ") || "Modèle non renseigné")} · ${esc(volumeTexte(m))} · buse ${nb(m.buse, 2)} mm</div>
+        <div id="etat-tete" style="margin-top:10px"></div>
+        <div class="actions" style="margin-top:14px">
+          <button class="btn" id="modif">Modifier</button>
+          <button class="btn" id="photo">${m.photo ? "Changer la photo" : "Ajouter une photo"}</button>
+          ${m.photo ? `<button class="btn" id="sans-photo">Revenir au dessin</button>` : ""}
+        </div>
+      </div>
+    </div>
+    <div class="deux">
+      <div class="pile">
+        <section class="carte"><h2>En ce moment</h2><div id="direct"></div></section>
+        <section class="carte"><h2>Historique</h2>${tableImpressions(siennes)}</section>
+      </div>
+      <div class="pile">
+        <section class="carte"><h2>Statistiques</h2><div class="chiffres mini">
+          <div class="chiffre"><b>${siennes.length}</b><span>impressions</span></div>
+          <div class="chiffre"><b>${reussite ?? "–"}${reussite !== null ? " %" : ""}</b><span>réussite</span></div>
+          <div class="chiffre"><b>${nb(heures, 1)} h</b><span>d'impression</span></div>
+          <div class="chiffre"><b>${nb(grammes / 1000, 2)} kg</b><span>filament</span></div></div></section>
+        <section class="carte"><h2>Caractéristiques</h2><dl class="infos">
+          <dt>Marque</dt><dd>${esc(m.marque || "–")}</dd><dt>Modèle</dt><dd>${esc(m.modele || "–")}</dd>
+          <dt>Technologie</dt><dd>${m.techno === "resine" ? "Résine" : "Filament (FDM)"}</dd>
+          <dt>Volume</dt><dd>${esc(volumeTexte(m))}</dd><dt>Buse</dt><dd>${nb(m.buse, 2)} mm</dd>
+          <dt>Connexion</dt><dd>${esc(connexion)}</dd>
+          ${m.pilote !== "manuel" ? `<dt>Adresse</dt><dd>${esc(m.adresse || "–")}</dd>` : ""}
+          ${m.pilote === "bambu_lan" ? `<dt>N° de série</dt><dd>${esc(m.numero_serie || "–")}</dd><dt>Code d'accès</dt><dd>${m.code_acces_renseigne ? "renseigné" : "manquant"}</dd>` : ""}
+        </dl></section>
+        <section class="carte"><h2>Presets</h2>${sesPresets.length ? `<div class="liste-fichiers">${sesPresets.map((p) => `<a class="ligne-fichier" href="#/presets"><span class="ico">${nb(p.hauteur_couche, 2)}</span><span><div class="nom">${esc(p.nom)}</div><div class="info">${esc(nomFil(p.filament_id))} · ${p.remplissage ?? "–"} % ${esc(p.motif || "")}</div></span><span></span></a>`).join("")}</div>` : `<div class="vide">Aucun preset pour cette machine. <a href="#/presets">Presets</a></div>`}</section>
+        ${m.notes ? `<section class="carte"><h2>Notes</h2><div style="white-space:pre-wrap">${esc(m.notes)}</div></section>` : ""}
+      </div>
+    </div>`;
+
+  const enCours = siennes.find((i) => i.resultat === "en_cours");
+  const rendre = (e = {}) => {
+    const etat = etatDe(m, e);
+    const v = imageMachine(m, e);
+    if ($("#vignette").dataset.v !== v) { $("#vignette").innerHTML = v; $("#vignette").dataset.v = v; }
+    $("#etat-tete").innerHTML = `<span class="pastille grande ${ETATS_MACHINE[etat] || "p-neutre"}">${esc(libelleEtat(etat))}</span>
+      ${e.message ? `<span class="sous" style="margin-left:8px">${esc(e.message)}</span>` : ""}`;
+    $("#direct").innerHTML = directMachine(m, e, enCours);
+  };
+  rendre(etats[m.id]);
+  minuterie = setInterval(async () => rendre((await api("etat-machines"))[m.id]), 3000);
+
+  $("#modif").onclick = () => editer("machines", champsMachine(), m, (r) => (r ? route() : (location.hash = "#/machines")));
+  $("#photo").onclick = () => {
+    const entree = Object.assign(document.createElement("input"), { type: "file", accept: "image/jpeg,image/png,image/webp" });
+    entree.onchange = async () => {
+      const fd = new FormData();
+      fd.append("photo", entree.files[0]);
+      try { await api(`machines/${m.id}/photo`, { method: "PUT", body: fd }); toast("Photo enregistrée"); route(); }
+      catch (e) { toast("Erreur : " + e.message); }
+    };
+    entree.click();
+  };
+  $("#sans-photo")?.addEventListener("click", async () => { await api(`machines/${m.id}/photo`, { method: "DELETE" }); route(); });
+  $("#direct").onclick = async (ev) => {
+    const b = ev.target.closest("[data-statut]");
+    if (b) { await api("machines/" + m.id, { method: "PUT", body: { statut_manuel: b.dataset.statut } }); route(); }
+    if (ev.target.closest("#lancer-ici")) lancerSurMachine(m, fichiers, filaments, siennes);
+  };
+};
+
+function directMachine(m, e = {}, enCours = null) {
+  const actif = ["impression", "pause", "preparation"].includes(e.etat);
+  const temp = (nom, v, c) => (v === undefined ? "" : `<div class="temp-bloc"><span>${nom}</span><b>${nb(v, 0)} °C</b><small>consigne ${c ? nb(c, 0) + " °C" : "arrêt"}</small></div>`);
+  const temps = e.temp_buse !== undefined ? `<div class="temps">${temp("Buse", e.temp_buse, e.consigne_buse)}${temp("Plateau", e.temp_plateau, e.consigne_plateau)}</div>` : "";
+  if (m.pilote === "manuel") {
+    const statuts = [["libre", "Libre"], ["maintenance", "Maintenance"], ["hors_service", "Hors service"]];
+    return `${enCours ? `<div class="travail grand"><span>${esc(enCours.fichier_nom || "Impression")}</span><span class="sous">depuis ${heure(enCours.debut)}</span></div>
+        <div class="actions" style="margin-top:10px">${boutonsSuivi(enCours)}</div>`
+      : `<div class="sous">Machine sans connexion : son état se note ici.</div>
+        <div class="actions" style="margin-top:10px"><button class="btn prim" id="lancer-ici">Lancer une impression</button></div>`}
+      ${!enCours ? `<div class="segments" style="margin-top:14px">${statuts.map(([k, l]) => `<button class="${m.statut_manuel === k ? "actif" : ""}" data-statut="${k}">${l}</button>`).join("")}</div>` : ""}`;
+  }
+  if (!e.connexion || ["incomplete", "erreur", "deconnectee", "connexion..."].includes(e.connexion) && !e.etat)
+    return `<div class="sous">${esc(e.message || libelleEtat(e.connexion))}</div>${e.connexion === "incomplete" ? `<div class="actions" style="margin-top:10px"><button class="btn" onclick="document.getElementById('modif').click()">Renseigner la connexion</button></div>` : ""}`;
+  return `${actif || e.etat === "terminee" ? `<div class="travail grand"><span>${esc(e.travail || "Impression")}</span><b>${e.progression ?? 0} %</b></div>
+      <div class="jauge grande"><i style="width:${e.progression || 0}%"></i></div>
+      <div class="detail">${detailImpression(e)}</div>` : `<div class="sous">Aucune impression en cours.</div>`}
+    ${temps}
+    ${e.code_erreur ? `<div class="pastille p-bad" style="margin-top:8px">erreur ${esc(e.code_erreur)}</div>` : ""}
+    ${actif ? `<div class="actions" style="margin-top:14px">
+      ${e.etat === "pause" ? `<button class="btn prim" data-cmd="reprendre" data-id="${m.id}">Reprendre</button>` : `<button class="btn" data-cmd="pause" data-id="${m.id}">Pause</button>`}
+      <button class="btn danger" data-cmd="arreter" data-id="${m.id}">Arrêter</button></div>` : ""}`;
+}
+
+// Lancer une impression sur cette machine (machine sans connexion) : choix de la pièce, filament repris d'avant.
+async function lancerSurMachine(m, fichiers, filaments, siennes) {
+  const pieces = fichiers.filter((f) => ["piece", "gcode"].includes(f.role));
+  const derniere = siennes[0] || {};
+  const r = await formulaire({
+    titre: `Lancer une impression sur ${m.nom}`, valider: "Lancer maintenant",
+    valeurs: { fichier_id: derniere.fichier_id, filament_id: derniere.filament_id, quantite: 1 },
+    champs: [
+      { k: "fichier_id", l: "Pièce", t: "select", large: true, options: [["", "—"], ...pieces.map((f) => [f.id, `${f.projet} / ${f.nom}${f.variante ? " (" + f.variante + ")" : ""}`])] },
+      { k: "filament_id", l: "Filament", t: "select", options: [["", "—"], ...filaments.map((x) => [x.id, `${x.matiere} ${x.marque} ${x.couleur}`.trim()])] },
+      { k: "quantite", l: "Quantité", t: "number", pas: 1 },
+      { k: "grammes", l: "Filament (g / pièce)", t: "number", aide: "estimé d'après la pièce ; retiré du stock à la fin" },
+      { k: "notes", l: "Notes", t: "textarea", large: true },
+    ],
+    surChange: async (nom, v, f) => {
+      if (!["fichier_id", "filament_id"].includes(nom) || !v.fichier_id) return;
+      const c = await api(`fichiers/${v.fichier_id}/compatibilite`);
+      const e = c.estimation.find((x) => String(x.filament_id) === String(v.filament_id)) || c.estimation[0];
+      if (e) f.elements.grammes.value = e.grammes;
+    },
+  });
+  if (!r) return;
+  try {
+    await api("impressions", { method: "POST", body: { ...r, machine_id: m.id, resultat: "en_cours" } });
+    toast("Impression lancée");
+    route();
+  } catch (e) { toast("Erreur : " + e.message); }
+}
 
 // ---- filaments
 pages.filaments = async () => {
@@ -1037,7 +1196,7 @@ async function route() {
   page.classList.remove("depot-actif");
   const [chemin, requete] = location.hash.replace(/^#\/?/, "").split("?");
   const [nom, id] = chemin.split("/");
-  $$("nav.cote a[data-route]").forEach((a) => a.classList.toggle("actif", a.dataset.route === (nom === "projet" || nom === "fichier" ? "projets" : nom)));
+  $$("nav.cote a[data-route]").forEach((a) => a.classList.toggle("actif", a.dataset.route === (nom === "projet" || nom === "fichier" ? "projets" : nom === "machine" ? "machines" : nom)));
   const fn = pages[nom] || pages[""];
   try { await fn(new URLSearchParams(requete || ""), id); }
   catch (e) { page.innerHTML = `<div class="carte vide">Erreur : ${esc(e.message)}</div>`; }

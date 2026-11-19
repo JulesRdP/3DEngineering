@@ -3,7 +3,7 @@ import io
 import runpy
 import zipfile
 
-from conftest import NEMA_V1, cube_stl, deposer
+from conftest import NEMA_V1, cube_stl, deposer, png_uni
 
 
 def test_crud_generique(client):
@@ -237,3 +237,22 @@ def test_duree_estimee_par_le_trancheur_preferee(client):
                                               "debut": "2020-01-01T08:00:00"}).json()
     fin = client.post(f"/api/impressions/{i['id']}/terminer", json={"resultat": "reussie"}).json()
     assert fin["duree_min"] == 180
+
+
+def test_photo_machine(client):
+    """Photo facultative d'une imprimante : déposée, servie, remplacée, retirée ; effacée avec la machine."""
+    m = client.post("/api/machines", json={"nom": "Kobra"}).json()
+    assert m["photo"] is None and client.get(f"/api/machines/{m['id']}/photo").status_code == 404
+    r = client.put(f"/api/machines/{m['id']}/photo", files={"photo": ("kobra.png", png_uni(), "image/png")})
+    assert r.status_code == 200 and r.json()["photo"].startswith(f"/api/machines/{m['id']}/photo?v=")
+    assert client.get(f"/api/machines/{m['id']}/photo").content == png_uni()
+    assert client.get("/api/machines").json()[0]["photo"]
+    r = client.put(f"/api/machines/{m['id']}/photo", files={"photo": ("kobra.jpeg", b"\xff\xd8jpeg", "image/jpeg")})
+    assert client.get(f"/api/machines/{m['id']}/photo").headers["content-type"] == "image/jpeg"
+    assert len(list((client.module.PHOTOS_MACHINES).glob(f"{m['id']}.*"))) == 1, "l'ancienne photo est remplacée"
+    assert client.put(f"/api/machines/{m['id']}/photo", files={"photo": ("x.exe", b"MZ", "application/octet-stream")}).status_code == 400
+    assert client.put("/api/machines/999/photo", files={"photo": ("a.png", png_uni(), "image/png")}).status_code == 404
+    assert client.delete(f"/api/machines/{m['id']}/photo").json()["photo"] is None
+    client.put(f"/api/machines/{m['id']}/photo", files={"photo": ("kobra.png", png_uni(), "image/png")})
+    client.delete(f"/api/machines/{m['id']}")
+    assert not list(client.module.PHOTOS_MACHINES.glob(f"{m['id']}.*")), "photo effacée avec la machine"

@@ -40,6 +40,10 @@ Variables : `HOTE`, `PORT` (lancement), `ATELIER3D_DONNEES` (dossier des donnée
 - `atelier3d/machines.py` : un pilote par machine (`PiloteBambu` MQTT TLS, `PiloteMoonraker` HTTP,
   `PiloteManuel`), gérés par `Parc`, resynchronisé à chaque modification d'une machine. Adresse Bambu = `IP` ou
   `IP:port`. Une machine `manuel` passe seule en « occupée » / « libre » selon ses impressions en cours.
+  Photo facultative d'une machine : `data/machines/<id>.<ext>` (`PUT/GET/DELETE /api/machines/{id}/photo`), son
+  adresse est dans le champ `photo` renvoyé avec la machine. Sans photo : `static/imprimantes.js` dessine la machine
+  en SVG selon sa forme, devinée d'après marque / modèle (`forme` : porte-à-faux, portique, caisson, cadre) et
+  animée selon l'état. Cartes des machines = liens vers `#/machine/<id>` (état en direct, commandes, historique).
 - `atelier3d/static/` : interface page unique en JS vanilla (modules ES, routes dans `#hash`), three.js
   vendorisé dans `static/vendor/` (pas de npm, pas de build). `vision.js` = vue 3D ; `chargerObjet` calcule les
 normales des 3MF (le chargeur three.js n'en fait pas, et nos matériaux remplacent les siens). Styles d'affichage

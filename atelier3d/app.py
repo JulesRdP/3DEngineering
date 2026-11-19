@@ -22,6 +22,7 @@ ICI = Path(__file__).parent
 DONNEES = Path(os.environ.get("ATELIER3D_DONNEES", ICI.parent / "data"))
 FICHIERS = DONNEES / "fichiers"
 MINIATURES = DONNEES / "miniatures"
+PHOTOS_MACHINES = DONNEES / "machines"   # photo de chaque imprimante (facultative) : <machine_id>.<ext>
 PLANS = DONNEES / "plans"          # plans générés par le navigateur, gardés : <fichier_id>.json
 
 db = Base(DONNEES / "atelier.db")
@@ -97,10 +98,21 @@ def _existe(table, ident):
 
 
 def _masquer(m):
-    """Le code d'accès ne repart pas vers le navigateur, on indique juste s'il est renseigné."""
+    """Le code d'accès ne repart pas vers le navigateur, on indique juste s'il est renseigné.
+    Ajoute l'adresse de la photo de la machine (avec sa date, pour ne pas revoir l'ancienne) ou None."""
     m = dict(m)
     m["code_acces_renseigne"] = bool(m.pop("code_acces", ""))
+    photo = _photo_machine(m["id"])
+    m["photo"] = f"/api/machines/{m['id']}/photo?v={int(photo.stat().st_mtime)}" if photo else None
     return m
+
+
+FORMATS_PHOTO = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+
+
+def _photo_machine(ident):
+    return next((p for p in PHOTOS_MACHINES.glob(f"{ident}.*") if p.suffix in FORMATS_PHOTO), None) \
+        if PHOTOS_MACHINES.exists() else None
 
 
 # ------------------------------------------------------------------ CRUD générique (sauf fichiers)
@@ -144,6 +156,8 @@ def _crud(table, ordre="id DESC", sortie=lambda x: x, apres=None):
             for f in db.tous("SELECT * FROM fichiers WHERE projet_id = ?", (ident,)):
                 _effacer_fichier_disque(f)
         db.supprimer(table, ident)
+        if table == "machines" and (photo := _photo_machine(ident)):
+            photo.unlink()
         if apres:
             apres(ident)
         return {"ok": True}
@@ -176,6 +190,39 @@ def _occupation_machines_manuelles():
             change = True
     if change:
         _synchro_parc()
+
+
+@app.get("/api/machines/{ident}/photo")
+def photo_machine(ident: int):
+    p = _photo_machine(ident)
+    if not p:
+        raise HTTPException(404, "pas de photo")
+    return FileResponse(p, media_type=FORMATS_PHOTO[p.suffix])
+
+
+@app.put("/api/machines/{ident}/photo")
+async def deposer_photo_machine(ident: int, photo: UploadFile = File(...)):
+    """Photo de l'imprimante (remplace le dessin) : JPEG, PNG ou WebP, 8 Mo au plus."""
+    _existe("machines", ident)
+    ext = Path(photo.filename or "").suffix.lower()
+    if ext not in FORMATS_PHOTO:
+        raise HTTPException(400, "photo attendue : JPEG, PNG ou WebP")
+    contenu = await photo.read()
+    if len(contenu) > 8_000_000:
+        raise HTTPException(400, "photo trop lourde (8 Mo au plus)")
+    PHOTOS_MACHINES.mkdir(parents=True, exist_ok=True)
+    if ancienne := _photo_machine(ident):
+        ancienne.unlink()
+    (PHOTOS_MACHINES / f"{ident}{'.jpg' if ext == '.jpeg' else ext}").write_bytes(contenu)
+    return _masquer(_existe("machines", ident))
+
+
+@app.delete("/api/machines/{ident}/photo")
+def supprimer_photo_machine(ident: int):
+    _existe("machines", ident)
+    if p := _photo_machine(ident):
+        p.unlink()
+    return _masquer(_existe("machines", ident))
 
 
 @app.post("/api/impressions/{ident}/lancer")
