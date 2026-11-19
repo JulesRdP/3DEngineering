@@ -53,7 +53,9 @@ export function preparerMaillage(objets) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.Float32BufferAttribute(pts.flat(), 3));
   geo.setIndex(faces.flat());
-  const boite = { min: [0, 1, 2].map((k) => Math.min(...pts.map((p) => p[k]))), max: [0, 1, 2].map((k) => Math.max(...pts.map((p) => p[k]))) };
+  // boucle plutôt que Math.min(...liste) : une grosse pièce dépasserait la limite d'arguments d'une fonction
+  const boite = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] };
+  for (const p of pts) for (let k = 0; k < 3; k++) { boite.min[k] = Math.min(boite.min[k], p[k]); boite.max[k] = Math.max(boite.max[k], p[k]); }
   return { pts, faces, normales, aretes, geo, boite };
 }
 

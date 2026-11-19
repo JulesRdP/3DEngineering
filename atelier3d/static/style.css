@@ -137,6 +137,29 @@ tr.cliquable { cursor: pointer; } tr.cliquable:hover td { background: var(--surf
 .vision canvas { width: 100% !important; height: 100% !important; display: block; }
 .vision .calque { position: absolute; left: 10px; bottom: 8px; font-family: var(--mono); font-size: 12px; color: var(--muted); pointer-events: none; }
 .vision .outils { position: absolute; right: 8px; top: 8px; display: flex; gap: 4px; }
+/* contrôle de cotation au-dessus du plan */
+.controle-plan { margin-bottom: 10px; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--line); border-left-width: 3px; font-size: 13px; }
+.controle-plan.ok { border-left-color: var(--ok); }
+.controle-plan.ok b { color: var(--ok); }
+.controle-plan.attention { border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 8%, transparent); }
+.controle-plan.attention b { color: var(--warn); }
+/* barre des styles d'affichage de la vue 3D (vision.js) */
+.affichage-3d { position: absolute; right: 8px; top: 8px; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; z-index: 2; }
+.styles-3d { display: flex; gap: 2px; padding: 3px; background: color-mix(in srgb, var(--surface) 88%, transparent); border: 1px solid var(--line); border-radius: 8px; backdrop-filter: blur(6px); }
+.styles-3d button { width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; padding: 0; }
+.styles-3d button:hover { color: var(--fg); background: var(--surface2); }
+.styles-3d button[aria-pressed="true"], .styles-3d button[aria-expanded="true"] { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.styles-3d button[data-options] { margin-left: 3px; box-shadow: -4px 0 0 -3px var(--line); }
+.styles-3d button:focus-visible, .panneau-affichage button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.panneau-affichage { width: 236px; padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--ombre); font-size: 12.5px; }
+.panneau-affichage[hidden] { display: none; }
+.panneau-affichage label { display: grid; grid-template-columns: 1fr auto; gap: 4px; color: var(--muted); }
+.panneau-affichage label span { font-family: var(--mono); color: var(--fg); }
+.panneau-affichage input[type=range] { grid-column: 1 / -1; padding: 0; border: 0; accent-color: var(--accent); background: transparent; }
+.panneau-affichage .segments { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.panneau-affichage .segments button { border: 0; background: transparent; padding: 5px 4px; cursor: pointer; color: var(--muted); font-size: 12px; }
+.panneau-affichage .segments button[aria-pressed="true"] { background: var(--surface2); color: var(--fg); font-weight: 600; }
+.panneau-affichage .lien { border: 0; background: none; padding: 0; color: var(--muted); text-decoration: underline; cursor: pointer; font-size: 12px; text-align: left; }
 .vision iframe, .vision img.plan { width: 100%; height: 100%; border: 0; object-fit: contain; background: #fff; }
 .etiquettes-3d { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 .repere { position: absolute; left: 0; top: 0; width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: var(--accent-fg); font-weight: 700; font-size: 12.5px; display: grid; place-items: center; box-shadow: 0 0 0 2px var(--surface), 0 2px 6px rgba(0,0,0,.3); }

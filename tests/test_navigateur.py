@@ -19,7 +19,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from conftest import NEMA_V1, NEMA_V2, cube_stl, revolution, stl_binaire
+from conftest import NEMA_V1, NEMA_V2, cube_stl, plaque_poche, revolution, stl_binaire
 
 
 def trouver_navigateur():
@@ -60,7 +60,8 @@ def serveur(tmp_path_factory):
     with httpx.Client(base_url=base, timeout=30) as c:
         p = c.post("/api/projets", json={"nom": "Tests navigateur"}).json()
         for cle, nom, contenu in [("v1", "support_nema17_v1.stl", NEMA_V1.read_bytes()), ("v2", "support_nema17_v2.stl", NEMA_V2.read_bytes()),
-                                  ("cube", "cube.stl", cube_stl()), ("tube", "tube.stl", stl_binaire(revolution([(3, 0), (10, 0), (10, 8), (3, 8)])))]:
+                                  ("cube", "cube.stl", cube_stl()), ("tube", "tube.stl", stl_binaire(revolution([(3, 0), (10, 0), (10, 8), (3, 8)]))),
+                                  ("poche", "poche.stl", stl_binaire(plaque_poche()))]:
             ids[cle] = c.post(f"/api/projets/{p['id']}/fichiers", files=[("fichiers", (nom, contenu))]).json()[0]["id"]
         for fid in ids.values():
             for _ in range(200):
@@ -108,6 +109,7 @@ def test_interface_onglet_plan(serveur):
     assert "Plein écran" in dom and 'data-vis="plus"' in dom, "visionneuse (zoom, plein écran)"
     assert dom.count('data-feuille="') == 2, "onglets des deux feuilles"
     assert "aperçu impossible" not in dom
+    assert re.search(r'id="plan-controle" class="controle-plan ok"[^>]*><b>✓ Cotation complète</b>', dom), "bilan du contrôle de cotation"
 
 
 def test_interface_reglages(serveur):
@@ -132,6 +134,19 @@ def test_interface_nouveau_projet_avec_modele(serveur):
     for ext in [".stl", ".3mf", ".obj", ".step"]:
         assert ext in champ.group(1)
     assert "Créer le projet" in dom and "glisser un modèle 3D sur la page" in dom
+
+
+def test_interface_barre_affichage_3d(serveur):
+    """Page d'une pièce : la vue 3D a sa barre de styles d'affichage (comme en CAO) et ses options."""
+    base, ids = serveur
+    dom = page(f"{base}/#/fichier/{ids['v1']}", budget_ms=10000)
+    barre = re.search(r'id="vision"[\s\S]*?class="affichage-3d"([\s\S]*?)class="panneau-affichage"', dom)
+    assert barre, "barre d'affichage absente de la vue 3D"
+    for style in ["ombre", "ombre_aretes", "sans_cachees", "cachees", "filaire"]:
+        assert f'data-style="{style}"' in barre.group(1), style
+    assert re.search(r'data-style="ombre_aretes"[^>]*aria-pressed="true"|aria-pressed="true"[^>]*data-style="ombre_aretes"', dom), \
+        "style par défaut de l'atelier : ombré avec arêtes"
+    assert 'data-curseur="contraste"' in dom and 'data-curseur="reflets"' in dom and 'data-couleur="gris"' in dom
 
 
 def test_interface_apercu_3d_a_cote_du_plan(serveur):

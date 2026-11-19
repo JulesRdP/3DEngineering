@@ -36,6 +36,17 @@ async function reglages(recharger = false) {
 }
 const reglage = async (cle) => (await reglages()).valeurs[cle];
 
+// module de la vue 3D, avec l'affichage par défaut de l'atelier (réglages vue3d.*, libellés → clés de vision.js)
+async function vision3d() {
+  const [mod, { valeurs: r }] = await Promise.all([import("/static/vision.js"), reglages()]);
+  const cle = (liste, libelle) => liste.find(([, l]) => l === libelle)?.[0];
+  mod.definirDefauts({
+    style: cle(mod.STYLES, r["vue3d.affichage.style"]), couleur: cle(mod.COULEURS, r["vue3d.affichage.couleur"]),
+    contraste: r["vue3d.affichage.contraste"], reflets: r["vue3d.affichage.reflets"],
+  });
+  return mod;
+}
+
 function toast(msg) {
   const t = document.createElement("div");
   t.className = "toast";
@@ -473,7 +484,7 @@ async function apercuProjet(fichiers) {
   if (!zone) return;
   const pieces = fichiers.filter((f) => ["stl", "3mf"].includes(f.type));
   const aDesEnfants = new Set(pieces.map((f) => f.parent_id).filter(Boolean));
-  const { Vue3D, PALETTE } = await import("/static/vision.js");
+  const { Vue3D, PALETTE } = await vision3d();
   const couleur = (i) => "#" + PALETTE[i % PALETTE.length].toString(16).padStart(6, "0");
   const vue = new Vue3D(zone, $("#calque-projet"));
   $("#choix-pieces").innerHTML = pieces.map((f, i) => `<label class="choix"><input type="checkbox" data-piece="${f.id}" ${aDesEnfants.has(f.id) ? "" : "checked"}>
@@ -518,6 +529,7 @@ pages.fichier = async (params, id) => {
           <button class="btn prim" id="plan-pdf">Télécharger le plan (PDF)</button><button class="btn" id="plan-png">PNG</button>
           <button class="btn" id="plan-garder">Enregistrer le PDF dans le projet</button><button class="btn" id="plan-cartouche">Cartouche…</button></div>
           <div class="onglets" id="plan-feuilles" style="flex-wrap:wrap;margin-bottom:10px"></div>
+          <div id="plan-controle" class="controle-plan" hidden></div>
           <div id="plan-toile" class="plan-toile"><div class="vide">Génération du plan…</div></div></div></div>
         ${f.notes ? `<section class="carte"><h2>Notes</h2><div style="white-space:pre-wrap">${esc(f.notes)}</div></section>` : ""}
         <section class="carte"><h2>Historique d'impression</h2>${tableImpressions(f.impressions.map((i) => ({ ...i, machine_nom: machines.find((x) => x.id === i.machine_id)?.nom })), false)}</section>
@@ -593,7 +605,7 @@ async function afficher(f, m) {
     zone.innerHTML = m.miniature ? `<img class="plan" src="/api/fichiers/${f.id}/miniature" alt="">` : `<div class="vide" style="padding-top:30%">Pas d'aperçu pour ce type de fichier</div>`;
     return;
   }
-  const { Vue3D } = await import("/static/vision.js");
+  const { Vue3D } = await vision3d();
   const vue = new Vue3D(zone, $("#calque"));
   try { await vue.ajouter(f.id, url, f.type); } catch (e) { $("#calque").textContent = "aperçu impossible : " + e.message; return; }
   vue.cadrer();
@@ -640,11 +652,11 @@ async function afficher(f, m) {
   // aperçu 3D à côté du plan, manipulable ; la pièce en sort quand on clique sur une vue
   const ouvrirApercu = async () => {
     if (apercu3d || !visionneuse.apercuOuvert) return;
-    const { Vue3D } = await import("/static/vision.js");
+    const { Vue3D } = await vision3d();
     const calque = document.createElement("div");
     calque.className = "calque";
     visionneuse.apercu.append(calque);
-    apercu3d = new Vue3D(visionneuse.apercu, calque);
+    apercu3d = new Vue3D(visionneuse.apercu, calque, { barre: false });   // panneau étroit : il suit la vue principale
     await apercu3d.ajouter(f.id, `/api/fichiers/${f.id}/contenu`, f.type);
     apercu3d.cadrer();
     apercu3d.decor.visible = false;   // ni grille ni axes : la pièce flotte sur l'interface
@@ -699,11 +711,27 @@ async function afficher(f, m) {
       masse: fil && m.volume_mm3 ? `${nb((m.volume_mm3 / 1000) * (fil.densite || 1.24))} g (plein)` : "",
     };
   };
+  // contrôle de cotation (plan.js) : le plan suffit-il à refaire la pièce ?
+  const afficherControle = (c) => {
+    const zone = $("#plan-controle");
+    if (!c) { zone.hidden = true; return; }
+    const liste = (l) => l.map((x) => `${x.axe} = ${nb(x.val, 2)}`).join(", ");
+    const cachees = c.ajoutees.filter((x) => x.cachee);
+    const details = [
+      c.ajoutees.length ? `${c.ajoutees.length} cote(s) ajoutée(s) par le contrôle (${liste(c.ajoutees)})${cachees.length ? `, dont ${cachees.length} sur des traits cachés` : ""}.` : "",
+      c.manquantes.length ? `Non cotés : ${liste(c.manquantes)}.` : "",
+      c.nonIndiquees.length ? `Formes sans indication : ${c.nonIndiquees.map(esc).join(" ; ")}.` : "",
+    ].filter(Boolean);
+    zone.className = "controle-plan " + (c.complet ? "ok" : "attention");
+    zone.innerHTML = `<b>${c.complet ? "✓ Cotation complète" : "⚠ Cotation incomplète"}</b> · ${c.niveaux} niveaux cotés : chaque sommet de la pièce est donné par une cote ou par une forme indiquée (Ø, R, chanfrein).${details.length ? `<div class="sous">${details.join(" ")}</div>` : ""}`;
+    zone.hidden = false;
+  };
   const genererPlan = async () => {
     const { dessinerPlan } = await import("/static/plan.js");
     feuilles = dessinerPlan(vue.visibles(), { reperes, formes: m.formes, cartouche: await infosCartouche() });
     $("#plan-feuilles").innerHTML = feuilles.length > 1 ? feuilles.map((t, i) => `<button data-feuille="${i}">Feuille ${i + 1} · ${esc(t.titre || "")}</button>`).join("") : "";
     $$("#plan-feuilles button").forEach((b) => (b.onclick = () => montrerFeuille(+b.dataset.feuille)));
+    afficherControle(feuilles[0].infos.controle);
     await montrerFeuille(Math.min(courante, feuilles.length - 1));
   };
   const pdfPlan = async () => {

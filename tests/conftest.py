@@ -92,6 +92,41 @@ def revolution(profil, n=48, rotation=None, decalage=(0, 0, 0)):
     return tris
 
 
+def solide_grille(xs, ys, zs, plein):
+    """Solide fait de cellules d'une grille (plein(i, j, k) -> bool), surface triangulée sur toute la grille :
+    beaucoup de sommets au milieu des faces et des arêtes, comme un maillage exporté sans soin."""
+    n = (len(xs) - 1, len(ys) - 1, len(zs) - 1)
+    rempli = lambda i, j, k: 0 <= i < n[0] and 0 <= j < n[1] and 0 <= k < n[2] and plein(i, j, k)
+    g = (xs, ys, zs)
+    tris = []
+    for i in range(n[0]):
+        for j in range(n[1]):
+            for k in range(n[2]):
+                if not rempli(i, j, k):
+                    continue
+                c = (i, j, k)
+                for ax in range(3):
+                    for s in (0, 1):
+                        v = list(c); v[ax] += 1 if s else -1
+                        if rempli(*v):
+                            continue
+                        a, b = [x for x in range(3) if x != ax]
+                        coin = lambda da, db: tuple(g[x][c[x] + (s if x == ax else da if x == a else db)] for x in range(3))
+                        q = [coin(0, 0), coin(1, 0), coin(1, 1), coin(0, 1)]
+                        # normale sortante (+ax si s, sinon −ax) ; le quadrilatère tourne selon e_a × e_b, qui vaut
+                        # +e_ax quand (a, b, ax) est dans l'ordre cyclique
+                        if (s == 1) != (b == (a + 1) % 3):
+                            q = q[::-1]
+                        tris += [[q[0], q[1], q[2]], [q[0], q[2], q[3]]]
+    return tris
+
+
+def plaque_poche():
+    """Plaque 40 × 6 × 30 avec une poche au dos (côté Y+) : X 10→30, Z 8→22, 2 mm de profondeur. Vue de face
+    (depuis Y−), la poche n'apparaît qu'en traits cachés."""
+    return solide_grille([0, 10, 30, 40], [0, 4, 6], [0, 8, 22, 30], lambda i, j, k: not (i == 1 and j == 1 and k == 1))
+
+
 def stl_binaire(tris):
     out = bytearray(b"\0" * 80) + struct.pack("<I", len(tris))
     for a, b, c in tris:

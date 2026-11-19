@@ -33,6 +33,22 @@ SECTIONS = [
               "aide": "f fine, m moyenne, c grossière, v très grossière (K : tolérances géométriques)."},
          ]},
     ]},
+    {"id": "vue3d", "titre": "Vue 3D", "groupes": [
+        {"titre": "Affichage par défaut",
+         "aide": "Pour tout l'atelier. Chacun peut changer l'affichage avec la barre en haut à droite de la vue 3D : "
+                 "ce choix est retenu par son navigateur (« Revenir aux réglages de l'atelier » pour l'oublier).",
+         "reglages": [
+             {"cle": "vue3d.affichage.style", "libelle": "Style d'affichage", "type": "choix", "defaut": "Ombré avec arêtes",
+              "choix": ["Ombré", "Ombré avec arêtes", "Lignes cachées supprimées", "Lignes cachées apparentes", "Filaire"],
+              "aide": "Comme dans un logiciel de CAO : les arêtes et contours soulignent les formes."},
+             {"cle": "vue3d.affichage.couleur", "libelle": "Couleur des pièces", "type": "choix", "defaut": "Couleur des pièces",
+              "choix": ["Couleur des pièces", "Gris CAO"], "aide": "Gris CAO : teinte neutre où les reliefs se lisent le mieux."},
+             {"cle": "vue3d.affichage.contraste", "libelle": "Contraste des reliefs", "type": "nombre", "unite": "%",
+              "min": 0, "max": 100, "pas": 5, "defaut": 50, "aide": "Plus fort : faces à l'ombre plus sombres, lumière plus directionnelle."},
+             {"cle": "vue3d.affichage.reflets", "libelle": "Reflets", "type": "nombre", "unite": "%",
+              "min": 0, "max": 100, "pas": 5, "defaut": 30, "aide": "0 = mat comme du PLA ; 100 = brillant, reflets de studio."},
+         ]},
+    ]},
     {"id": "general", "titre": "Général", "groupes": [
         {"titre": "Filaments", "reglages": [
             {"cle": "general.filaments.stock_bas", "libelle": "Seuil de stock bas", "type": "nombre", "unite": "g",

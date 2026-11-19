@@ -41,11 +41,16 @@ Variables : `HOTE`, `PORT` (lancement), `ATELIER3D_DONNEES` (dossier des donnée
   `PiloteManuel`), gérés par `Parc`, resynchronisé à chaque modification d'une machine.
 - `atelier3d/static/` : interface page unique en JS vanilla (modules ES, routes dans `#hash`), three.js
   vendorisé dans `static/vendor/` (pas de npm, pas de build). `vision.js` = vue 3D ; `chargerObjet` calcule les
-normales des 3MF (le chargeur three.js n'en fait pas, et nos matériaux remplacent les siens). Mise en plan :
+normales des 3MF (le chargeur three.js n'en fait pas, et nos matériaux remplacent les siens). Styles d'affichage
+façon CAO (ombré, arêtes, lignes cachées, filaire ; couleur, contraste, reflets) : barre dans la vue, défauts =
+réglages `vue3d.*`, choix de la barre retenu par navigateur (localStorage). Éclairage attaché à la caméra. Mise en plan :
   - `plan.js` : dessin industriel normalisé (ISO 128 traits, 129 cotation, 5456 projection européenne, 5457 cadre,
     7200 cartouche) — vues alignées face / dessus (dessous) / gauche (à droite, remplacée par une coupe A–A par
     l'axe d'un perçage), cotation en cotes d'origine sans doublon (`repartirCotes`), indications Ø / lamage / R /
     chanfrein, choix A4 portrait ou A3 paysage et échelle normalisée, vue isométrique. Données : `meta.formes`.
+    Contrôle de cotation (`controlerCotation`) : chaque vrai coin de la pièce, sur chaque axe, doit être donné par
+    une cote ou par une forme indiquée et située ; sinon la cote est ajoutée (au besoin sur traits cachés), et le
+    bilan (`feuille.infos.controle`) s'affiche au-dessus du plan. Une face vue nulle part est cotée en caché.
   - `aretes.js` : arêtes vives + contours apparents, tri vues / cachées par carte de profondeur WebGL, sections.
     Une ou deux feuilles (`choisirMiseEnPage`) : deux si l'échelle y gagne (face + coupe, puis vue de dessus
     désignée par flèche de référence + iso).

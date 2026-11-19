@@ -121,6 +121,8 @@ function repartirCotes(vues, formes, groupes, boite) {
       if (coupee) cands.push({ v: vi, prio: 2.5 });
       else if (V.voitPlan(p)) cands.push({ v: vi, prio: 1 });
     });
+    // face vue nulle part (poche au dos, rainure intérieure…) : cotée sur ses traits cachés plutôt que pas du tout
+    if (!cands.length) vues.forEach((V, vi) => { if (Math.abs(ps(p.n, V.vue.f)) < 1e-4) cands.push({ v: vi, prio: 0.2 }); });
     // flancs d'un oblong : évidents (centre + largeur suffisent)
     if (!inclinee && (formes.oblongs || []).some((o) => Math.abs(ps(o.axe, p.n)) < 1e-4
       && [o.c1, o.c2].some((c) => Math.abs(Math.abs(p.point[k] - c[k]) - o.r) < 0.01))) continue;
@@ -172,6 +174,113 @@ function repartirCotes(vues, formes, groupes, boite) {
     const k = indiceAxe(sens === "h" ? V.vue.r : V.vue.u);
     if (V.cotes[sens].length && !V.cotes[sens].some((c) => Math.abs(c.val) < 0.005)) V.cotes[sens].push({ val: 0, monde: boite.min[k], ancres: [] });
   }
+}
+
+// ------------------------------------------------------------------ contrôle : le plan suffit-il à refaire la pièce ?
+//
+// Chaque sommet de la pièce, sur chaque axe, doit être donné par le plan : soit sa coordonnée est une cote
+// (cotes d'origine, donc une valeur lue directement), soit le sommet appartient à une forme indiquée et située
+// (trou, oblong, bossage, arrondi : Ø ou R + centre coté ; chanfrein « a × 45° »). Ce qui manque est ajouté
+// (dans une vue qui le montre, sinon sur les traits cachés) ; ce qui ne peut pas l'être est signalé.
+
+const TOL_COTE = 0.011;
+
+function niveauxCotes(vues) {
+  const L = [[], [], []];
+  for (const V of vues) for (const sens of ["h", "v"]) {
+    const k = indiceAxe(sens === "h" ? V.vue.r : V.vue.u);
+    for (const c of V.cotes[sens]) L[k].push(c.monde);
+  }
+  return L;
+}
+const estCote = (L, k, v) => L[k].some((x) => Math.abs(x - v) < TOL_COTE);
+
+// Le sommet p est-il sur la surface de cette forme (cylindre de l'un de ses rayons, entre ses extrémités) ?
+function surForme(p, g, it) {
+  const base = it.centre ?? it.c1, a = it.axe;
+  const d = p.map((v, i) => v - base[i]);
+  const t = ps(d, a);
+  const lo = Math.min(it.debut, it.fin) - it.debut, hi = Math.max(it.debut, it.fin) - it.debut;
+  if (t < lo - TOL_COTE || t > hi + TOL_COTE) return false;
+  const q = d.map((v, i) => v - t * a[i]);   // dans le plan perpendiculaire à l'axe, depuis le centre
+  let dist = Math.hypot(...q);
+  if (g.type === "oblong") {
+    const e = it.c2.map((v, i) => v - it.c1[i]), l2 = ps(e, e) || 1e-12;
+    const s = Math.max(0, Math.min(1, ps(q, e) / l2));
+    dist = Math.hypot(...q.map((v, i) => v - s * e[i]));
+  }
+  const rayons = g.type === "percage" ? it.etages.map((e) => e.r) : [it.r];
+  return rayons.some((r) => Math.abs(dist - r) < 0.02 + r * 0.003);
+}
+
+function controlerCotation(m, vues, formes, groupes, boite, { completer = true } = {}) {
+  const axesVue = (V) => [indiceAxe(V.vue.r), indiceAxe(V.vue.u)];
+  const chanfreins = (formes.plans || []).filter((p) => p.indique && indiceAxe(p.n) < 0);
+  const formesIndiquees = groupes.filter((g) => g.indique).flatMap((g) => g.items.map((it) => ({ g, it })));
+  const nonIndiquees = new Set();
+
+  // Seuls les vrais coins comptent : sommets où des arêtes vives changent de direction. Un sommet au milieu d'une
+  // arête droite ou d'une face plane (découpage du maillage) n'a pas de position à donner.
+  const dirs = m.pts.map(() => []);
+  for (const e of m.aretes) {
+    if (!e.vive) continue;
+    const a = m.pts[e.i], b = m.pts[e.j], d = b.map((v, i) => v - a[i]), l = Math.hypot(...d) || 1;
+    dirs[e.i].push(d.map((v) => v / l)); dirs[e.j].push(d.map((v) => -v / l));
+  }
+  const coins = m.pts.filter((_, i) => dirs[i].length && !(dirs[i].length === 2 && ps(dirs[i][0], dirs[i][1]) < -0.99999));
+  // face tangente à une forme ronde située (flancs d'une encoche en U, d'un oblong) : centre ± rayon
+  const tangente = (p, k, L) => formesIndiquees.some(({ g, it }) => Math.abs(it.axe[k]) < 0.5 && g.type !== "percage"
+    && (g.type === "oblong" ? [it.c1, it.c2] : [pointAxe(it, it.debut)]).some((c) => estCote(L, k, c[k]) && Math.abs(Math.abs(p[k] - c[k]) - it.r) < TOL_COTE));
+
+  const manques = (L) => {
+    const parNiveau = new Map();   // "k|val" -> { k, val, sommets }
+    for (const p of coins) {
+      // formes sur lesquelles se trouve ce sommet (leurs centres doivent être cotés, eux)
+      const sur = formesIndiquees.filter(({ g, it }) => surForme(p, g, it));
+      for (let k = 0; k < 3; k++) {
+        if (estCote(L, k, p[k]) || tangente(p, k, L)) continue;
+        if (sur.length) {
+          // sur une forme indiquée : la coordonnée découle de son centre et de son rayon (ou de sa profondeur) ;
+          // un congé est situé par les faces qu'il raccorde, une autre forme par son centre coté
+          const situee = sur.find(({ g, it }) => g.type === "arrondi" && it.angle < 179
+            || [0, 1, 2].every((kk) => Math.abs(it.axe[kk]) > 0.5 || (g.type === "oblong" ? [it.c1, it.c2] : [pointAxe(it, it.debut)]).every((c) => estCote(L, kk, c[kk]))));
+          if (situee) continue;
+        }
+        if (chanfreins.some((c) => Math.abs(c.n[k]) > 1e-4 && Math.abs(ps(p.map((v, i) => v - c.point[i]), c.n)) < TOL_COTE
+          && p.every((v, i) => v >= c.min[i] - TOL_COTE && v <= c.max[i] + TOL_COTE))) continue;
+        const cle = `${k}|${Math.round(p[k] * 100)}`;
+        if (!parNiveau.has(cle)) parNiveau.set(cle, { k, val: Math.round(p[k] * 100) / 100, sommets: [] });
+        parNiveau.get(cle).sommets.push(p);
+      }
+    }
+    return [...parNiveau.values()];
+  };
+
+  // sommets d'une forme reconnue mais jamais indiquée (aucune vue ne la montre en vraie grandeur)
+  for (const g of groupes.filter((x) => !x.indique)) nonIndiquees.add(indication(g).map((l) => l.filter((x) => typeof x === "string").join("")).join(" "));
+
+  const ajoutees = [];
+  let L = niveauxCotes(vues);
+  if (completer) {
+    for (const n of manques(L)) {
+      if (estCote(L, n.k, n.val)) continue;
+      // la vue qui montre ce niveau en trait plein, sinon celle qui a le moins de cotes sur cet axe
+      const cands = vues.filter((V) => axesVue(V).includes(n.k));
+      const vu = (V) => n.sommets.some((p) => V.aretes.voit(p.map((c, i) => c - V.vue.f[i] * 0.02)));
+      const sens = (V) => (indiceAxe(V.vue.r) === n.k ? "h" : "v");
+      const V = cands.find(vu) || cands.sort((a, b) => a.cotes[sens(a)].length - b.cotes[sens(b)].length)[0];
+      V.cotes[sens(V)].push({ val: n.val - boite.min[n.k], monde: n.val, ancres: n.sommets.slice(0, 40).map((p) => ({ p, r: 0 })) });
+      L[n.k].push(n.val);
+      ajoutees.push({ axe: AXES[n.k], val: n.val - boite.min[n.k], vue: V.nom, cachee: !vu(V), exemple: n.sommets[0] });
+    }
+    L = niveauxCotes(vues);
+  }
+  const manquantes = manques(L).map((n) => ({ axe: AXES[n.k], val: n.val - boite.min[n.k] }));
+  return {
+    complet: !manquantes.length && !nonIndiquees.size,
+    niveaux: L.reduce((s, l) => s + new Set(l.map((v) => Math.round(v * 100))).size, 0),
+    ajoutees, manquantes, nonIndiquees: [...nonIndiquees],
+  };
 }
 
 // ------------------------------------------------------------------ dessin d'une vue
@@ -403,6 +512,7 @@ function preparerIndications(vues, groupes, formes) {
       const ch = chanfreins.get(cle);
       ch.n++;
       if (versTexte(V, c) > versTexte(V, ch.c)) ch.c = c;
+      p.indique = true;   // pour le contrôle de cotation : ses arêtes sont données par « a × 45° »
       break;
     }
   }
@@ -711,13 +821,14 @@ export function dessinerPlan(objets, { reperes = [], formes = null, cartouche: i
   repartirCotes(vues, formes, groupes, boite);
   for (const V of vues) V.coteIndications = V.coupe ? "bas" : "droite";
   preparerIndications(vues, groupes, formes);
+  const controle = controlerCotation(m, vues, formes, groupes, boite);
   // le trait de coupe (flèches, lettres) dépasse au-dessus de la vue de face : cotes plus loin
   if (coupe) vues[0].decal = { h: 16 };
 
   const mises = choisirMiseEnPage(vues, boite);
   const feuilles = mises.map((mep) => {
     const F = new Feuille(mep.format, mep.orientation);
-    F.infos = { cercles: [], coupes: [], reperes: [] };   // géométrie utile aux contrôles automatiques du plan
+    F.infos = { cercles: [], coupes: [], reperes: [], controle };   // géométrie utile aux contrôles automatiques du plan
     F.mep = mep;
     cadre(F);
     return F;

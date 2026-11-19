@@ -160,7 +160,7 @@ await essai("plan V1 : indications Ø, lamage, oblongs, rayons, chanfreins", asy
   for (const t of ["Ø22,8", "4× Ø3,4", "Ø6,5 ", "4× oblong 5,5 × 15,5", "4× R4", "R4", "2× 6,01 × 45°"]) egal(nombre(F, t), 1, `« ${t} » :`);
 });
 
-for (const cle of ["v1", "v2", "cube", "tube"]) {
+for (const cle of ["v1", "v2", "cube", "tube", "poche"]) {
   await essai(`plan ${cle} : aucun texte ne se chevauche`, async () => {
     for (const [k, F] of (await plan(q.get(cle))).feuilles.entries()) {
       const bs = F.ops.filter((o) => o.t === "texte").map((o) => ({ s: o.s, b: boite(o) })).filter((x) => x.b);
@@ -268,6 +268,50 @@ await essai("plan tube : trou vertical coupé, Ø du trou et du tube", async () 
   const F = (await plan(q.get("tube"))).tout;
   egal(nombre(F, "A–A"), 1, "coupe par l'axe du trou");
   vrai(textes(F).includes("Ø6"), "Ø6"); vrai(textes(F).includes("Ø20"), "Ø20");
+});
+
+// ------------------------------------------------------------------ contrôle de cotation (plan suffisant pour refaire la pièce)
+
+await essai("contrôle de cotation : pièces de référence complètes, sans cote ajoutée", async () => {
+  for (const cle of ["v1", "v2", "cube", "tube"]) {
+    const c = (await plan(q.get(cle))).feuilles[0].infos.controle;
+    vrai(c, `${cle} : pas de bilan`);
+    egal([c.complet, c.manquantes, c.nonIndiquees], [true, [], []], `${cle} :`);
+    egal(c.ajoutees.map((x) => `${x.axe}=${x.val}`), [], `${cle} : cotes ajoutées par le contrôle (la répartition aurait dû les faire) :`);
+  }
+});
+
+await essai("contrôle de cotation : poche au dos, vue seulement en traits cachés, quand même cotée", async () => {
+  const { feuilles, tout: F } = await plan(q.get("poche"));
+  const c = feuilles[0].infos.controle;
+  egal(c.complet, true, "complet");
+  // poche X 10 → 30, Z 8 → 22, fond à Y 4 ; plaque 40 × 6 × 30
+  for (const v of ["10", "30", "8", "22", "4", "40", "6"]) vrai(textes(F).includes(v), `cote ${v} absente`);
+  // les sommets du maillage au milieu des faces (découpage en grille) ne donnent pas de cotes
+  egal(textes(F).filter((t) => /^\d+(,\d+)?$/.test(t) && !["0", "4", "6", "8", "10", "22", "30", "40"].includes(t) && !/^[1-8]$/.test(t)), [], "cotes en trop :");
+});
+
+await essai("contrôle de cotation : sans les faces reconnues par l'analyse, le contrôle complète seul", async () => {
+  const { obj } = await fichier(q.get("poche"));
+  const feuilles = dessinerPlan([obj], { formes: { percages: [], oblongs: [], bossages: [], arrondis: [], plans: [] } });
+  const c = feuilles[0].infos.controle;
+  egal(c.complet, true, "complété");
+  const ajout = c.ajoutees.map((x) => `${x.axe}=${x.val}`).sort();
+  for (const n of ["X=10", "X=30", "Y=4", "Z=8", "Z=22"]) vrai(ajout.includes(n), `${n} non ajoutée par le contrôle (${ajout})`);
+  vrai(c.ajoutees.some((x) => x.cachee), "au moins une sur traits cachés (la poche est derrière)");
+  const tout = feuilles.flatMap((x) => textes(x));
+  for (const v of ["10", "30", "8", "22", "4"]) vrai(tout.includes(v), `cote ${v} absente du dessin`);
+});
+
+await essai("contrôle de cotation : signale un trou que rien n'indique", async () => {
+  const { f, obj } = await fichier(q.get("v1"));
+  // on « oublie » la vue où l'alésage est vu en vraie grandeur : on lui fait croire qu'il est d'axe incliné
+  const formes = JSON.parse(JSON.stringify(f.meta.formes));
+  const gros = formes.percages.reduce((a, b) => (Math.max(...b.etages.map((e) => e.r)) > Math.max(...a.etages.map((e) => e.r)) ? b : a));
+  gros.axe = [0.6, 0.8, 0];
+  const c = dessinerPlan([obj], { formes })[0].infos.controle;
+  egal(c.complet, false, "incomplet");
+  vrai(c.nonIndiquees.some((t) => t.includes("Ø22,8")), `Ø22,8 signalé : ${JSON.stringify(c.nonIndiquees)}`);
 });
 
 await essai("plan : génération en moins de 5 s", async () => {
@@ -521,6 +565,120 @@ await essai("3MF : pièce éclairée avec ses reliefs (normales par face), pas t
   vrai(teintes.size >= 3, `faces toutes de la même teinte (${teintes.size}) : reliefs invisibles`);
   v.detruire(); zone.remove();
   await fetch(`/api/projets/${p.id}`, { method: "DELETE" });
+});
+
+// ------------------------------------------------------------------ vue 3D : styles d'affichage
+
+// rend la vue et compte ses pixels : pièce (opaques), traits sombres, et luminosité de la pièce
+function photo(v) {
+  v.decor.visible = false;
+  v.ctl.update(); v.majSilhouettes();
+  v.rendu.render(v.scene, v.camera);
+  const gl = v.rendu.getContext(), w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
+  const px = new Uint8Array(w * h * 4);
+  gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+  let opaques = 0, sombres = 0, s = 0, s2 = 0, traces = 0;   // traces : tout ce qui est dessiné, même en transparence
+  for (let i = 0; i < px.length; i += 4) {
+    if (px[i + 3] > 20) traces++;
+    if (px[i + 3] < 200) continue;
+    opaques++;
+    const l = (px[i] + px[i + 1] + px[i + 2]) / 3;
+    if (l < 50) sombres++;
+    s += l; s2 += l * l;
+  }
+  const moy = s / (opaques || 1);
+  return { opaques, sombres, traces, moy, ecart: Math.sqrt(Math.max(0, s2 / (opaques || 1) - moy * moy)) };
+}
+async function vueEssai(id, type = "stl", options) {
+  const vis = await import("/static/vision.js");
+  const zone = document.createElement("div"); zone.style.cssText = "width:360px;height:270px;position:relative";
+  const calque = document.createElement("div"); zone.append(calque); document.body.append(zone);
+  const v = new vis.Vue3D(zone, calque, options);
+  v.ajuster();
+  await v.ajouter("p", `/api/fichiers/${id}/contenu`, type);
+  v.cadrer();
+  return { vis, v, fin: () => { v.detruire(); zone.remove(); vis.changerAffichage(null); } };
+}
+
+await essai("vue 3D : les cinq styles d'affichage (ombré, arêtes, lignes cachées, filaire)", async () => {
+  const { vis, v, fin } = await vueEssai(q.get("v1"));
+  const m = {};
+  for (const [style] of vis.STYLES) { vis.changerAffichage({ style, couleur: "piece" }); m[style] = photo(v); }
+  vrai(m.ombre.opaques > 8000, `ombré : pièce peinte (${m.ombre.opaques} px)`);
+  vrai(m.ombre_aretes.sombres > m.ombre.sombres + 150, `arêtes sombres sur la pièce (${m.ombre.sombres} → ${m.ombre_aretes.sombres} px)`);
+  vrai(Math.abs(m.ombre_aretes.opaques - m.ombre.opaques) < m.ombre.opaques * 0.05, "mêmes faces peintes");
+  vrai(m.sans_cachees.opaques < m.ombre.opaques * 0.4 && m.sans_cachees.opaques > 300, `lignes cachées supprimées : des traits, pas de faces (${m.sans_cachees.opaques} px)`);
+  vrai(m.cachees.traces > m.sans_cachees.traces * 1.15, `lignes cachées apparentes en plus (${m.sans_cachees.traces} → ${m.cachees.traces} px)`);
+  vrai(m.filaire.traces > m.sans_cachees.traces * 1.15, `filaire : tous les traits (${m.sans_cachees.traces} → ${m.filaire.traces} px)`);
+  fin();
+});
+
+await essai("vue 3D : contours apparents des surfaces courbes, recalculés quand on tourne", async () => {
+  const { vis, v, fin } = await vueEssai(q.get("tube"));
+  vis.changerAffichage({ style: "sans_cachees" });
+  photo(v);
+  const t = v.traits.get("p");
+  const n1 = t.gSil.drawRange.count;
+  vrai(n1 >= 4, `deux génératrices de contour sur le tube (${n1 / 2} segments)`);
+  vrai(t.lisses.length > 50 && n1 < t.lisses.length, "seulement une partie des arêtes lisses");
+  const avant = Array.from(t.gSil.attributes.position.array.slice(0, 6));
+  v.camera.position.applyAxisAngle(new THREE.Vector3(0, 0, 1), 1.2);
+  photo(v);
+  vrai(JSON.stringify(Array.from(t.gSil.attributes.position.array.slice(0, 6))) !== JSON.stringify(avant), "contour déplacé avec le regard");
+  vis.changerAffichage({ style: "ombre" });
+  photo(v);
+  egal(t.groupe.visible, false, "pas de traits en ombré");
+  fin();
+});
+
+await essai("vue 3D : contraste des reliefs et reflets", async () => {
+  const { vis, v, fin } = await vueEssai(q.get("v1"));
+  vis.changerAffichage({ style: "ombre", couleur: "gris", reflets: 0, contraste: 0 });
+  const doux = photo(v);
+  vis.changerAffichage({ contraste: 100 });
+  const fort = photo(v);
+  vrai(fort.ecart > doux.ecart * 1.3, `faces mieux différenciées avec du contraste (écart ${doux.ecart.toFixed(1)} → ${fort.ecart.toFixed(1)})`);
+  vrai(doux.moy > 70 && fort.moy > 50, `pièce ni noire ni éteinte (${doux.moy.toFixed(0)}, ${fort.moy.toFixed(0)})`);
+  const mat = v.materiaux.get("p");
+  vis.changerAffichage({ reflets: 100 });
+  vrai(mat.roughness < 0.3 && mat.envMapIntensity > 1, `reflets : surface lisse (rugosité ${mat.roughness}) et studio visible`);
+  vrai(v.scene.environment, "environnement de studio pour les reflets");
+  egal(mat.color.getHex(), 0xa7b1bd, "gris CAO");
+  vis.changerAffichage({ couleur: "piece" });
+  egal(mat.color.getHex(), 0xe0661b, "couleur de la pièce");
+  fin();
+});
+
+await essai("vue 3D : barre d'affichage, choix retenu par le navigateur, retour aux réglages de l'atelier", async () => {
+  const { vis, v, fin } = await vueEssai(q.get("cube"));
+  // les libellés des réglages de l'atelier sont ceux de la barre (app.js passe de l'un à l'autre)
+  const { sections } = await (await fetch("/api/reglages")).json();
+  const defs = Object.fromEntries(sections.flatMap((s) => s.groupes.flatMap((g) => g.reglages)).map((r) => [r.cle, r]));
+  egal(defs["vue3d.affichage.style"].choix, vis.STYLES.map(([, l]) => l), "styles");
+  egal(defs["vue3d.affichage.couleur"].choix, vis.COULEURS.map(([, l]) => l), "couleurs");
+  const b = v.barre;
+  egal(b.querySelectorAll("[data-style]").length, 5, "un bouton par style");
+  vis.definirDefauts({ style: "sans_cachees", contraste: 20 });
+  egal(v.affichage.style, "sans_cachees", "défaut de l'atelier appliqué");
+  egal(b.querySelector('[aria-pressed="true"][data-style]').dataset.style, "sans_cachees", "bouton enfoncé");
+  b.querySelector('[data-style="filaire"]').click();
+  egal(vis.affichageCourant().style, "filaire", "choix de la barre");
+  egal(JSON.parse(localStorage.getItem("atelier3d.affichage3d")).style, "filaire", "retenu par ce navigateur");
+  egal(v.affichage.style, "filaire", "vue mise à jour");
+  const panneau = b.querySelector(".panneau-affichage");
+  b.querySelector("[data-options]").click();
+  egal(panneau.hidden, false, "panneau des options ouvert");
+  const curseur = b.querySelector('[data-curseur="contraste"]');
+  curseur.value = 85; curseur.dispatchEvent(new Event("input"));
+  egal(v.affichage.contraste, 85, "curseur de contraste");
+  b.querySelector('[data-couleur="gris"]').click();
+  egal(v.affichage.couleur, "gris");
+  b.querySelector("[data-atelier]").click();
+  egal(localStorage.getItem("atelier3d.affichage3d"), null, "choix oublié");
+  egal([v.affichage.style, v.affichage.contraste, v.affichage.couleur], ["sans_cachees", 20, "piece"], "réglages de l'atelier");
+  vis.definirDefauts({});
+  egal(v.affichage, vis.AFFICHAGE_DEFAUT);
+  fin();
 });
 
 await essai("interface : les miniatures restent dans la vignette des cartes de projet", async () => {
