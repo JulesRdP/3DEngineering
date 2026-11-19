@@ -289,3 +289,35 @@ def test_jumeau_du_modele(client):
     r = client.get("/api/modeles/bambu-lab-a1/traits", headers={"Accept-Encoding": "gzip"})
     assert r.status_code == 200 and r.json()["version"] == 1 and r.headers.get("content-encoding") == "gzip"
     assert client.get("/api/modeles/..%2Fatelier/traits").status_code == 404
+
+
+def test_ordre_des_machines(client):
+    """Ordre choisi au glisser-déposer : gardé, utilisé partout ; nouvelles machines à la fin ; refus."""
+    a, b, c = (client.post("/api/machines", json={"nom": n}).json() for n in ("Alpha", "Bravo", "Charlie"))
+    assert [m["nom"] for m in client.get("/api/machines").json()] == ["Alpha", "Bravo", "Charlie"]
+    r = client.put("/api/machines/ordre", json={"ids": [c["id"], a["id"], b["id"]]})
+    assert [m["nom"] for m in r.json()] == ["Charlie", "Alpha", "Bravo"]
+    assert [m["nom"] for m in client.get("/api/machines").json()] == ["Charlie", "Alpha", "Bravo"]
+    client.post("/api/machines", json={"nom": "Aaa nouvelle"})
+    assert client.get("/api/machines").json()[-1]["nom"] == "Aaa nouvelle", "une nouvelle machine arrive à la fin"
+    p = client.post("/api/projets", json={"nom": "P"}).json()
+    f = deposer(client, p["id"], "cube.stl", cube_stl())
+    compat = client.get(f"/api/fichiers/{f['id']}/compatibilite").json()["machines"]
+    assert [x["nom"] for x in compat][:3] == ["Charlie", "Alpha", "Bravo"]
+    assert client.put("/api/machines/ordre", json={"ids": [999]}).status_code == 404
+    assert client.put("/api/machines/ordre", json={"ids": "a"}).status_code == 400
+    assert client.put(f"/api/machines/{a['id']}", json={"notes": "x"}).json()["notes"] == "x"  # /ordre ne gêne pas
+
+
+def test_colonne_ordre_ajoutee_a_une_base_existante(tmp_path):
+    """Base créée avant la colonne « ordre » : elle est ajoutée à l'ouverture, sans perdre les machines."""
+    import sqlite3
+
+    from atelier3d.db import Base
+    cx = sqlite3.connect(tmp_path / "vieille.db")
+    cx.execute("CREATE TABLE machines (id INTEGER PRIMARY KEY, nom TEXT NOT NULL, pilote TEXT DEFAULT 'manuel', notes TEXT DEFAULT '')")
+    cx.execute("INSERT INTO machines (nom) VALUES ('Ancienne')")
+    cx.commit()
+    cx.close()
+    db = Base(tmp_path / "vieille.db")
+    assert db.un("SELECT nom, ordre FROM machines") == {"nom": "Ancienne", "ordre": None}

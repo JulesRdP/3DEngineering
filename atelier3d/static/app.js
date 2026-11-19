@@ -334,7 +334,7 @@ const detailImpression = (e) => [e.reste_min ? "reste " + duree(e.reste_min) : "
 const etatDe = (m, e = {}) => e.etat || e.connexion || "inconnu";
 
 function carteMachine(m, e = {}, imp = null) {
-  return `<a class="carte-imp" href="#/machine/${m.id}" data-machine="${m.id}">
+  return `<a class="carte-imp" href="#/machine/${m.id}" data-machine="${m.id}" draggable="true">
     <div class="vignette">${vignetteMachine(m, e)}</div>
     <div class="corps">${corpsCarteMachine(m, e, imp)}</div></a>`;
 }
@@ -946,7 +946,7 @@ pages.machines = async () => {
   const [machines, etats, imp] = await Promise.all([api("machines"), api("etat-machines"), api("impressions")]);
   const enCoursSur = (m) => imp.find((i) => i.machine_id === m.id && i.resultat === "en_cours");
   page.innerHTML = `
-    <div class="entete"><div><h1>Machines</h1><div class="sous">${machines.length} imprimante${machines.length > 1 ? "s" : ""} · clic sur une machine pour l'ouvrir</div></div>
+    <div class="entete"><div><h1>Machines</h1><div class="sous">${machines.length} imprimante${machines.length > 1 ? "s" : ""} · clic pour ouvrir, glisser pour réordonner</div></div>
       <div class="actions"><button class="btn prim" id="nouv">Ajouter une machine</button></div></div>
     <div class="grille-imp" id="cartes">${machines.length ? "" : `<div class="vide">Aucune machine</div>`}</div>
     <section class="carte" style="margin-top:18px"><h2>Connecter une Bambu Lab</h2><div class="sous">Sur l'écran de l'imprimante : Réglages → Réseau → activer le mode « LAN » ou noter l'IP et le code d'accès.
@@ -954,9 +954,57 @@ pages.machines = async () => {
       Les Anycubic d'origine n'ont pas d'API locale ouverte : elles restent en état manuel, sauf si elles tournent sous Klipper (Rinkhals).</div></section>`;
   const rendre = (etats) => machines.length && majCartesMachines($("#cartes"), machines, etats, enCoursSur);
   rendre(etats);
+  reordonnable($("#cartes"), "[data-machine]", async (ids) => {
+    try { await api("machines/ordre", { method: "PUT", body: { ids: ids.map(Number) } }); toast("Ordre enregistré"); }
+    catch (e) { toast("Erreur : " + e.message); route(); }
+  });
   $("#nouv").onclick = () => editer("machines", champsMachine(), null, (m) => { if (m?.id) location.hash = "#/machine/" + m.id; else route(); });
   minuterie = setInterval(async () => rendre(await api("etat-machines")), 3000);
 };
+
+// Glisser-déposer pour réordonner les cartes d'une grille ; les autres glissent en douceur pour faire la place.
+// surFin(ids) reçoit le nouvel ordre (attribut data-machine) seulement s'il a changé.
+function reordonnable(grille, selecteur, surFin) {
+  let tenu = null, avant = "";
+  const ordre = () => $$(selecteur, grille).map((el) => el.dataset.machine);
+  const deplacer = (fn) => {   // animation « FLIP » : position avant → après
+    const els = $$(selecteur, grille), r0 = new Map(els.map((el) => [el, el.getBoundingClientRect()]));
+    fn();
+    for (const el of els) {
+      const a = r0.get(el), b = el.getBoundingClientRect();
+      if (el === tenu || (a.left === b.left && a.top === b.top)) continue;
+      el.animate([{ transform: `translate(${a.left - b.left}px, ${a.top - b.top}px)` }, { transform: "none" }], { duration: 180, easing: "ease-out" });
+    }
+  };
+  grille.addEventListener("dragstart", (ev) => {
+    tenu = ev.target.closest(selecteur);
+    if (!tenu) return;
+    avant = ordre().join();
+    ev.dataTransfer.effectAllowed = "move";
+    ev.dataTransfer.setData("text/plain", tenu.dataset.machine);
+    requestAnimationFrame(() => tenu?.classList.add("glisse"));
+    grille.classList.add("en-glisse");
+  });
+  grille.addEventListener("dragover", (ev) => {
+    if (!tenu) return;
+    ev.preventDefault();
+    const cible = ev.target.closest(selecteur);
+    if (!cible || cible === tenu) return;
+    const r = cible.getBoundingClientRect();
+    const apres = ev.clientY > r.bottom - r.height / 4 || (ev.clientY > r.top + r.height / 4 && ev.clientX > r.left + r.width / 2);
+    if ((apres ? cible.nextElementSibling : cible.previousElementSibling) === tenu) return;
+    deplacer(() => cible.insertAdjacentElement(apres ? "afterend" : "beforebegin", tenu));
+  });
+  grille.addEventListener("drop", (ev) => { if (tenu) ev.preventDefault(); });
+  grille.addEventListener("dragend", () => {
+    if (!tenu) return;
+    tenu.classList.remove("glisse");
+    grille.classList.remove("en-glisse");
+    tenu = null;
+    const ids = ordre();
+    if (ids.join() !== avant) surFin(ids);
+  });
+}
 
 // ---- une machine : en ce moment, commandes, historique, statistiques, caractéristiques
 pages.machine = async (params, id) => {

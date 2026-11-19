@@ -39,7 +39,8 @@ CREATE TABLE IF NOT EXISTS machines (
     pilote TEXT DEFAULT 'manuel',             -- manuel | bambu_lan | moonraker
     adresse TEXT DEFAULT '', numero_serie TEXT DEFAULT '', code_acces TEXT DEFAULT '',
     statut_manuel TEXT DEFAULT 'libre',       -- libre | occupee | maintenance | hors_service
-    notes TEXT DEFAULT ''
+    notes TEXT DEFAULT '',
+    ordre INTEGER                             -- rang d'affichage choisi à la souris (NULL = à la fin, par nom)
 );
 CREATE TABLE IF NOT EXISTS filaments (
     id INTEGER PRIMARY KEY,
@@ -93,7 +94,17 @@ class Base:
         self.cx.row_factory = sqlite3.Row
         self.cx.execute("PRAGMA foreign_keys = ON")
         self.cx.executescript(SCHEMA)
+        self._ajouter_colonnes({"machines": {"ordre": "INTEGER"}})
         self.verrou = threading.Lock()
+
+    def _ajouter_colonnes(self, colonnes):
+        """Colonnes ajoutées après coup : CREATE TABLE IF NOT EXISTS ne les crée pas dans une base existante."""
+        for table, cols in colonnes.items():
+            presentes = {r[1] for r in self.cx.execute(f"PRAGMA table_info({table})")}
+            for nom, definition in cols.items():
+                if nom not in presentes:
+                    self.cx.execute(f"ALTER TABLE {table} ADD COLUMN {nom} {definition}")
+        self.cx.commit()
 
     def tous(self, sql, params=()):
         with self.verrou:

@@ -328,7 +328,23 @@ def terminer_impression(ident: int, corps: dict):
     return _existe("impressions", ident)
 
 
-_crud("machines", "nom", sortie=_masquer, apres=lambda i: _synchro_parc())
+@app.put("/api/machines/ordre")
+def ordonner_machines(corps: dict):
+    """{ids: [id, …]} dans l'ordre voulu (glisser-déposer) ; les machines absentes de la liste passent après."""
+    ids = corps.get("ids")
+    if not isinstance(ids, list) or not all(isinstance(i, int) for i in ids):
+        raise HTTPException(400, "ids attendu : liste d'identifiants")
+    connues = {m["id"] for m in db.tous("SELECT id FROM machines")}
+    if set(ids) - connues:
+        raise HTTPException(404, f"machine(s) inconnue(s) : {sorted(set(ids) - connues)}")
+    db.executer("UPDATE machines SET ordre = NULL")
+    for rang, i in enumerate(dict.fromkeys(ids)):
+        db.modifier("machines", i, {"ordre": rang})
+    return [_masquer(m) for m in db.tous(f"SELECT * FROM machines ORDER BY {ORDRE_MACHINES}")]
+
+
+ORDRE_MACHINES = "ordre IS NULL, ordre, nom"
+_crud("machines", ORDRE_MACHINES, sortie=_masquer, apres=lambda i: _synchro_parc())
 _crud("filaments", "matiere, marque, couleur")
 _crud("presets", "nom")
 _crud("impressions", "COALESCE(debut, '') DESC, id DESC", apres=_apres_impression)
@@ -559,7 +575,7 @@ def compatibilite(ident: int):
     meta = f["meta"]
     dims = meta.get("dimensions")
     res = {"dimensions": dims, "machines": [], "estimation": []}
-    for m in db.tous("SELECT * FROM machines ORDER BY nom"):
+    for m in db.tous(f"SELECT * FROM machines ORDER BY {ORDRE_MACHINES}"):
         vol = [m["volume_x"], m["volume_y"], m["volume_z"]]
         if not dims or None in vol:
             verdict, detail = "inconnu", "volume d'impression non renseigné" if dims else "pièce pas encore analysée"

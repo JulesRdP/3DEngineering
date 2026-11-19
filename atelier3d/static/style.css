@@ -310,3 +310,10 @@ dialog .bas { display: flex; justify-content: flex-end; gap: 8px; }
 .stats-mini b { color: var(--fg); font-weight: 600; }
 .btn.discret { margin-top: 16px; background: transparent; color: var(--muted); }
 .btn.discret:hover { color: var(--fg); }
+
+/* réordonner les machines à la souris */
+.grille-imp .carte-imp { cursor: grab; }
+.grille-imp.en-glisse .carte-imp { cursor: grabbing; }
+.grille-imp.en-glisse .carte-imp:hover { transform: none; }
+.carte-imp.glisse { opacity: .35; border-style: dashed; border-color: var(--accent); box-shadow: none; }
+.carte-imp img, .carte-imp svg { -webkit-user-drag: none; user-select: none; }

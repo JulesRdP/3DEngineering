@@ -214,6 +214,7 @@ def test_interface_machines_cartes_et_page(serveur):
             carte = re.search(rf'<a class="carte-imp" href="#/machine/{m["id"]}"[\s\S]*?</a>', dom)
             assert carte, f"carte de {m['nom']} absente ou pas cliquable"
             assert "imp-dessin" in carte.group(0) and m["nom"] in carte.group(0)
+            assert 'draggable="true"' in carte.group(0), "carte pas déplaçable (glisser-déposer)"
         assert "Bambu Lab A1 mini" in dom and "Anycubic Kobra 3" in dom and "Maintenance" in dom and "À configurer" in dom
         dom = page(f"{base}/#/machine/{ko['id']}", budget_ms=8000)
         for texte in ["Kobra essai", "En ce moment", "Historique", 'class="stats-mini"', "Caractéristiques", "Lancer une impression", 'data-statut="libre"']:
