@@ -178,3 +178,24 @@ def test_interface_pages(serveur, route):
     assert 'id="page"' in dom
     contenu = re.search(r'<main[^>]*id="page"[^>]*>(.*?)</main>', dom, re.S)
     assert contenu and len(contenu.group(1).strip()) > 50, f"page « {route} » vide"
+
+
+def test_interface_suivi_impression_en_un_clic(serveur):
+    """Fiche d'une pièce : bouton « Lancer une impression » ; tableau de bord : l'impression en cours sur une
+    machine sans connexion apparaît sur sa carte et dans la liste, avec « Réussie » / « Ratée »."""
+    base, ids = serveur
+    dom = page(f"{base}/#/fichier/{ids['cube']}", budget_ms=8000)
+    assert 'id="lancer"' in dom and "Lancer une impression" in dom
+    with httpx.Client(base_url=base, timeout=30) as c:
+        m = c.post("/api/machines", json={"nom": "Kobra essai", "pilote": "manuel"}).json()
+        i = c.post("/api/impressions", json={"fichier_id": ids["cube"], "machine_id": m["id"], "resultat": "en_cours"}).json()
+        p = c.post("/api/impressions", json={"fichier_id": ids["cube"], "resultat": "prevue"}).json()
+    try:
+        dom = page(f"{base}/#/", budget_ms=8000)
+        carte = re.search(r"Kobra essai([\s\S]*?)</div>\s*</div>", dom)
+        assert carte and f'data-suivi="reussie" data-id="{i["id"]}"' in dom
+        assert f'data-suivi="ratee" data-id="{i["id"]}"' in dom and f'data-suivi="lancer" data-id="{p["id"]}"' in dom
+        assert "imp-manuelle" in dom, "l'impression en cours n'est pas sur la carte de la machine"
+    finally:
+        with httpx.Client(base_url=base, timeout=30) as c:
+            c.delete(f"/api/impressions/{i['id']}"); c.delete(f"/api/impressions/{p['id']}"); c.delete(f"/api/machines/{m['id']}")

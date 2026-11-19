@@ -9,6 +9,8 @@ const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const nb = (v, d = 1) => (v === null || v === undefined || v === "" ? "–" : Number(v).toLocaleString("fr-FR", { maximumFractionDigits: d }));
 const octets = (n) => (n > 1e6 ? nb(n / 1e6) + " Mo" : nb(n / 1e3, 0) + " ko");
 const date = (s) => (s ? new Date(s).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" }) : "–");
+const heure = (s) => { const d = new Date(s); return d.toDateString() === new Date().toDateString() ? d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : date(s); };
+const heureLocale = () => { const d = new Date(); return new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
 const duree = (min) => (min ? (min >= 60 ? `${Math.floor(min / 60)} h ${String(Math.round(min % 60)).padStart(2, "0")}` : `${Math.round(min)} min`) : "–");
 
 async function api(chemin, options = {}) {
@@ -72,7 +74,7 @@ function champHtml(c, v) {
   if (c.t === "select") {
     entree = `<select name="${c.k}">${(c.options || []).map(([o, l]) => `<option value="${esc(o)}" ${String(o) === String(val) ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`;
   } else if (c.t === "textarea") {
-    entree = `<textarea name="${c.k}" rows="3">${esc(val)}</textarea>`;
+    entree = `<textarea name="${c.k}" rows="3" placeholder="${esc(c.ph || "")}">${esc(val)}</textarea>`;
   } else if (c.t === "fichiers") {
     entree = `<input name="${c.k}" type="file" multiple ${c.accept ? `accept="${esc(c.accept)}"` : ""}>`;
   } else {
@@ -289,19 +291,20 @@ pages[""] = async () => {
         <section class="carte"><h2>Dernières impressions</h2>${tableImpressions(t.recentes)}</section>
       </div>
       <div class="pile">
-        <section class="carte"><h2>File d'attente</h2>${t.a_imprimer.length ? `<div class="liste-fichiers">${t.a_imprimer.map((i) => `
-          <a class="ligne-fichier" href="#/impressions"><span class="ico">${i.quantite > 1 ? "×" + i.quantite : "1"}</span>
-          <span><div class="nom">${esc(i.fichier_nom || "fichier ?")}</div><div class="info">${esc(i.machine_nom || "machine à choisir")}</div></span>${pastille(RESULTATS[i.resultat])}</a>`).join("")}</div>` : `<div class="vide">Rien en attente</div>`}</section>
+        <section class="carte"><h2>En cours et à imprimer</h2>${t.a_imprimer.length ? `<div class="liste-fichiers">${t.a_imprimer.map((i) => `
+          <a class="ligne-fichier" href="${i.fichier_id ? "#/fichier/" + i.fichier_id : "#/impressions"}"><span class="ico">${i.quantite > 1 ? "×" + i.quantite : "1"}</span>
+          <span><div class="nom">${esc(i.fichier_nom || "fichier ?")}</div><div class="info">${esc(i.machine_nom || "machine à choisir")}${i.resultat === "en_cours" && i.debut ? " · depuis " + heure(i.debut) : ""}</div></span>${boutonsSuivi(i)}</a>`).join("")}</div>` : `<div class="vide">Rien en attente</div>`}</section>
         <section class="carte"><h2>Stock bas (&lt; 200 g)</h2>${t.stock_bas.length ? t.stock_bas.map((f) => `<div style="padding:4px 0"><span class="pastille-couleur" style="background:${esc(f.couleur_hex)}"></span>${esc(f.matiere)} ${esc(f.marque)} ${esc(f.couleur)} <span class="pastille p-warn">${nb(f.stock_g, 0)} g</span></div>`).join("") : `<div class="vide">Stock correct</div>`}</section>
       </div>
     </div>`;
   $("[data-nouv-imp]").onclick = async () => editer("impressions", await champsImpression(), null, () => route());
-  const rendreMachines = (etats) => { if (machines.length) $("#cartes-machines").innerHTML = machines.map((m) => carteMachine(m, etats[m.id])).join(""); };
+  const enCoursSur = (m) => t.a_imprimer.find((i) => i.machine_id === m.id && i.resultat === "en_cours");
+  const rendreMachines = (etats) => { if (machines.length) $("#cartes-machines").innerHTML = machines.map((m) => carteMachine(m, etats[m.id], enCoursSur(m))).join(""); };
   rendreMachines(etats);
   minuterie = setInterval(async () => rendreMachines(await api("etat-machines")), 4000);
 };
 
-function carteMachine(m, e = {}) {
+function carteMachine(m, e = {}, imp = null) {
   const etat = e.etat || e.connexion || "inconnu";
   const enCours = ["impression", "pause", "preparation"].includes(e.etat);
   const vol = m.volume_x ? `${nb(m.volume_x, 0)} × ${nb(m.volume_y, 0)} × ${nb(m.volume_z, 0)} mm` : "volume non renseigné";
@@ -311,6 +314,7 @@ function carteMachine(m, e = {}) {
     ${enCours ? `<div class="jauge"><i style="width:${e.progression || 0}%"></i></div>
       <div style="font-size:13px">${esc(e.travail || "")} · ${e.progression ?? 0} %${e.reste_min ? " · reste " + duree(e.reste_min) : ""}${e.couche ? ` · couche ${e.couche}/${e.couches}` : ""}</div>` : ""}
     ${e.temp_buse !== undefined ? `<div class="temp"><span>buse ${nb(e.temp_buse, 0)}/${nb(e.consigne_buse, 0)} °C</span><span>plateau ${nb(e.temp_plateau, 0)}/${nb(e.consigne_plateau, 0)} °C</span></div>` : ""}
+    ${imp && m.pilote === "manuel" ? `<div class="imp-manuelle"><span>${esc(imp.fichier_nom || "impression")}${imp.debut ? ` · depuis ${heure(imp.debut)}` : ""}</span>${boutonsSuivi(imp)}</div>` : ""}
     ${e.message ? `<div class="sous" style="margin-top:6px">${esc(e.message)}</div>` : ""}
     ${e.code_erreur ? `<div class="pastille p-bad" style="margin-top:6px">erreur ${esc(e.code_erreur)}</div>` : ""}
     ${enCours && m.pilote !== "manuel" ? `<div class="actions" style="margin-top:10px">
@@ -332,12 +336,73 @@ function tableImpressions(liste, avecFichier = true) {
   return `<div class="tab-cont"><table><thead><tr><th>Date</th>${avecFichier ? "<th>Fichier</th>" : ""}<th>Machine</th><th>Qté</th><th>Durée</th><th>Matière</th><th>Résultat</th></tr></thead><tbody>
     ${liste.map((i) => `<tr class="cliquable" data-imp="${i.id}"><td class="num">${date(i.debut)}</td>${avecFichier ? `<td>${esc(i.fichier_nom || "–")}</td>` : ""}
       <td>${esc(i.machine_nom || "–")}</td><td class="num">${i.quantite || 1}</td><td class="num">${duree(i.duree_min)}</td>
-      <td class="num">${i.grammes ? nb(i.grammes) + " g" : "–"}</td><td>${pastille(RESULTATS[i.resultat] || [i.resultat, "p-neutre"])}</td></tr>`).join("")}
+      <td class="num">${i.grammes ? nb(i.grammes) + " g" : "–"}</td><td>${boutonsSuivi(i) || pastille(RESULTATS[i.resultat] || [i.resultat, "p-neutre"])}</td></tr>`).join("")}
     </tbody></table></div>`;
 }
+
+// ---- suivi en un clic : prévue → « Lancer » ; en cours → « Réussie » / « Ratée »
+function boutonsSuivi(i) {
+  if (i.resultat === "prevue") return `<span class="suivi"><button class="btn petit" data-suivi="lancer" data-id="${i.id}">Lancer</button></span>`;
+  if (i.resultat === "en_cours") return `<span class="suivi"><button class="btn petit ok" data-suivi="reussie" data-id="${i.id}">Réussie</button><button class="btn petit danger" data-suivi="ratee" data-id="${i.id}">Ratée</button></span>`;
+  return "";
+}
+document.addEventListener("click", async (ev) => {
+  const b = ev.target.closest("[data-suivi]");
+  if (!b) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  const id = b.dataset.id;
+  try {
+    if (b.dataset.suivi === "lancer") {
+      await api(`impressions/${id}/lancer`, { method: "POST" });
+      toast("Impression lancée");
+    } else {
+      const corps = { resultat: b.dataset.suivi };
+      if (b.dataset.suivi === "ratee") {
+        const r = await formulaire({ titre: "Impression ratée", valider: "Noter ratée", champs: [{ k: "notes", l: "Qu'est-ce qui a raté ? (facultatif)", t: "textarea", large: true, ph: "décollement, spaghetti, buse bouchée…" }] });
+        if (!r) return;
+        corps.notes = r.notes;
+      }
+      const i = await api(`impressions/${id}/terminer`, { method: "POST", body: corps });
+      const g = i.stock_deduit && i.grammes ? ` · ${nb(i.grammes * (i.quantite || 1), 0)} g retirés du stock` : "";
+      toast((corps.resultat === "reussie" ? "Réussie" : "Ratée") + g);
+    }
+    route();
+  } catch (e) { toast("Erreur : " + e.message); }
+}, true);
+
+// Lancer tout de suite une impression du fichier : formulaire court, machine et filament repris de la dernière fois.
+async function lancerImpression(f, compat) {
+  const [machines, filaments] = await Promise.all([api("machines"), api("filaments")]);
+  const derniere = f.impressions.find((i) => i.machine_id || i.filament_id) || {};
+  const compatible = compat.machines.find((c) => c.verdict === "ok" || c.verdict === "tourner");
+  const machine_id = derniere.machine_id || compatible?.id || machines[0]?.id;
+  const filament_id = derniere.filament_id || compat.estimation[0]?.filament_id;
+  const estimation = (fid) => compat.estimation.find((e) => String(e.filament_id) === String(fid))?.grammes;
+  const verdict = (id) => compat.machines.find((c) => c.id === id)?.verdict;
+  const r = await formulaire({
+    titre: "Lancer une impression", valider: "Lancer maintenant",
+    valeurs: { machine_id, filament_id, quantite: 1, grammes: f.meta?.reglages_3mf?.poids_estime_g || estimation(filament_id) },
+    champs: [
+      { k: "machine_id", l: "Machine", t: "select", options: machines.map((m) => [m.id, m.nom + (verdict(m.id) === "trop_grand" ? " (trop petite)" : "")]) },
+      { k: "filament_id", l: "Filament", t: "select", options: [["", "—"], ...filaments.map((x) => [x.id, `${x.matiere} ${x.marque} ${x.couleur}`.trim()])] },
+      { k: "quantite", l: "Quantité", t: "number", pas: 1 },
+      { k: "grammes", l: "Filament (g / pièce)", t: "number", aide: "retiré du stock à la fin, réussie ou ratée" },
+      { k: "notes", l: "Notes", t: "textarea", large: true },
+    ],
+    surChange: (nom, v, form) => { if (nom === "filament_id" && !f.meta?.reglages_3mf?.poids_estime_g) form.elements.grammes.value = estimation(v.filament_id) ?? form.elements.grammes.value; },
+  });
+  if (!r) return;
+  try {
+    await api("impressions", { method: "POST", body: { ...r, fichier_id: f.id, resultat: "en_cours" } });
+    toast("Impression lancée : « Réussie » ou « Ratée » à la fin, depuis le tableau de bord");
+    route();
+  } catch (e) { toast("Erreur : " + e.message); }
+}
+
 document.addEventListener("click", async (ev) => {
   const tr = ev.target.closest("[data-imp]");
-  if (!tr) return;
+  if (!tr || ev.target.closest("[data-suivi]")) return;
   const imp = await api("impressions/" + tr.dataset.imp);
   editer("impressions", await champsImpression(), imp, () => route());
 });
@@ -517,7 +582,7 @@ pages.fichier = async (params, id) => {
         <a class="btn" href="/api/fichiers/${id}/contenu?telecharger=true">Télécharger</a>
         <button class="btn" id="variation">Nouvelle variation</button>
         <button class="btn" id="modif">Modifier</button>
-        ${["piece", "gcode"].includes(f.role) ? `<button class="btn prim" id="imprimer">Planifier l'impression</button>` : ""}
+        ${["piece", "gcode"].includes(f.role) ? `<button class="btn" id="imprimer">Planifier</button><button class="btn prim" id="lancer">Lancer une impression</button>` : ""}
       </div></div>
     <div class="deux">
       <div class="pile">
@@ -588,6 +653,7 @@ pages.fichier = async (params, id) => {
     const ok = compat.machines.find((c) => c.verdict === "ok" || c.verdict === "tourner");
     editer("impressions", champs, { fichier_id: f.id, machine_id: ok?.id, resultat: "prevue", grammes: compat.estimation[0]?.grammes, quantite: 1 }, () => route());
   });
+  $("#lancer")?.addEventListener("click", () => lancerImpression(f, compat));
   afficher(f, m);
   if (m.analyse === "en_cours") minuterie = setTimeout(() => route(), 2500);
 };
@@ -900,7 +966,7 @@ pages.impressions = async () => {
     <div class="entete"><div><h1>Journal d'impression</h1><div class="sous">Chaque impression notée : machine, matière, durée, résultat. Les grammes sont retirés du stock à la fin.</div></div>
       <div class="actions"><button class="btn prim" id="nouv">Noter une impression</button></div></div>
     <section class="carte">${tableImpressions(liste)}</section>`;
-  $("#nouv").onclick = async () => editer("impressions", await champsImpression(), { debut: new Date().toISOString().slice(0, 16) }, () => route());
+  $("#nouv").onclick = async () => editer("impressions", await champsImpression(), { debut: heureLocale() }, () => route());
 };
 
 // ------------------------------------------------------------------ routeur

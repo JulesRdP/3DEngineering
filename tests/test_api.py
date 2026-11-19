@@ -183,3 +183,57 @@ def test_interface_jamais_perimee_dans_le_navigateur(client):
     etag = client.get("/static/vision.js").headers["etag"]
     assert client.get("/static/vision.js", headers={"If-None-Match": etag}).status_code == 304, "rien n'a changé : 304"
     assert "no-cache" not in client.get(f"/api/fichiers/{f['id']}/contenu").headers.get("cache-control", "")
+
+
+def test_impression_lancee_puis_terminee_en_un_clic(client):
+    """Machine sans connexion : « occupée » pendant l'impression, « libre » après ; début daté au lancement,
+    durée = temps écoulé (pas d'estimation trancheur pour un STL), stock retiré, raison de l'échec gardée."""
+    m = client.post("/api/machines", json={"nom": "Kobra", "pilote": "manuel"}).json()
+    fil = client.post("/api/filaments", json={"matiere": "PLA", "stock_g": 1000}).json()
+    i = client.post("/api/impressions", json={"machine_id": m["id"], "filament_id": fil["id"], "grammes": 12,
+                                              "quantite": 2, "resultat": "en_cours", "notes": "V3"}).json()
+    assert i["debut"], "une impression créée « en cours » est datée"
+    assert client.get(f"/api/machines/{m['id']}").json()["statut_manuel"] == "occupee"
+    assert client.get("/api/etat-machines").json()[str(m["id"])]["etat"] == "occupee"
+
+    client.put(f"/api/impressions/{i['id']}", json={"debut": "2020-01-01T08:00:00"})  # pas d'estimation : temps écoulé
+    fin = client.post(f"/api/impressions/{i['id']}/terminer", json={"resultat": "ratee", "notes": "décollée"}).json()
+    assert fin["resultat"] == "ratee" and fin["stock_deduit"] == 1 and fin["duree_min"] > 60
+    assert fin["notes"] == "V3\ndécollée"
+    assert client.get(f"/api/filaments/{fil['id']}").json()["stock_g"] == 1000 - 24
+    assert client.get(f"/api/machines/{m['id']}").json()["statut_manuel"] == "libre"
+    assert client.post(f"/api/impressions/{i['id']}/terminer", json={"resultat": "reussie"}).status_code == 400
+
+
+def test_impression_prevue_lancee_et_refus(client):
+    m = client.post("/api/machines", json={"nom": "Kobra", "pilote": "manuel"}).json()
+    i = client.post("/api/impressions", json={"machine_id": m["id"], "resultat": "prevue"}).json()
+    assert client.get(f"/api/machines/{m['id']}").json()["statut_manuel"] == "libre"
+    lancee = client.post(f"/api/impressions/{i['id']}/lancer").json()
+    assert lancee["resultat"] == "en_cours" and lancee["debut"]
+    assert client.get(f"/api/machines/{m['id']}").json()["statut_manuel"] == "occupee"
+    assert client.post(f"/api/impressions/{i['id']}/lancer").status_code == 400  # déjà lancée
+    assert client.post(f"/api/impressions/{i['id']}/terminer", json={"resultat": "bof"}).status_code == 400
+    assert client.post("/api/impressions/999/lancer").status_code == 404
+    # supprimer l'impression en cours libère la machine
+    client.delete(f"/api/impressions/{i['id']}")
+    assert client.get(f"/api/machines/{m['id']}").json()["statut_manuel"] == "libre"
+
+
+def test_impression_terminee_ne_touche_pas_maintenance(client):
+    m = client.post("/api/machines", json={"nom": "Kobra", "pilote": "manuel", "statut_manuel": "maintenance"}).json()
+    i = client.post("/api/impressions", json={"machine_id": m["id"], "resultat": "en_cours"}).json()
+    client.post(f"/api/impressions/{i['id']}/terminer", json={"resultat": "annulee"})
+    assert client.get(f"/api/machines/{m['id']}").json()["statut_manuel"] == "maintenance"
+    assert client.get(f"/api/impressions/{i['id']}").json()["duree_min"] is None  # annulée : pas de durée inventée
+
+
+def test_duree_estimee_par_le_trancheur_preferee(client):
+    """Fin notée longtemps après (le lendemain matin) : la durée du 3MF fait foi, pas l'heure du clic."""
+    p = client.post("/api/projets", json={"nom": "P"}).json()
+    f = deposer(client, p["id"], "piece.stl", cube_stl())
+    client.module.db.modifier("fichiers", f["id"], {"meta": '{"reglages_3mf": {"duree_estimee_s": 5400}}'})
+    i = client.post("/api/impressions", json={"fichier_id": f["id"], "quantite": 2, "resultat": "en_cours",
+                                              "debut": "2020-01-01T08:00:00"}).json()
+    fin = client.post(f"/api/impressions/{i['id']}/terminer", json={"resultat": "reussie"}).json()
+    assert fin["duree_min"] == 180

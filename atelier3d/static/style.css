@@ -225,3 +225,8 @@ dialog .bas { display: flex; justify-content: flex-end; gap: 8px; }
 .onglets { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin-bottom: 14px; flex-wrap: wrap; }
 .onglets button { border: 0; background: none; padding: 8px 12px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; }
 .onglets button.actif { color: var(--fg); border-bottom-color: var(--accent); font-weight: 600; }
+
+/* suivi d'impression en un clic */
+.suivi { display: inline-flex; gap: 6px; }
+.btn.ok { color: var(--ok); }
+.imp-manuelle { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; }

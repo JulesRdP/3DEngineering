@@ -6,6 +6,7 @@ import re
 import shutil
 import threading
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -143,18 +144,77 @@ def _crud(table, ordre="id DESC", sortie=lambda x: x, apres=None):
             for f in db.tous("SELECT * FROM fichiers WHERE projet_id = ?", (ident,)):
                 _effacer_fichier_disque(f)
         db.supprimer(table, ident)
-        if table == "machines":
-            _synchro_parc()
+        if apres:
+            apres(ident)
         return {"ok": True}
 
 
 def _apres_impression(ident):
-    """Retire du stock les grammes d'une impression terminée (une seule fois)."""
+    """Après chaque écriture d'une impression (ou sa suppression) : date de début d'une impression lancée,
+    stock retiré une seule fois à la fin, état des machines sans connexion tenu à jour."""
     i = db.un("SELECT * FROM impressions WHERE id = ?", (ident,))
+    if i and i["resultat"] == "en_cours" and not i["debut"]:
+        db.modifier("impressions", ident, {"debut": maintenant()})
     if i and not i["stock_deduit"] and i["resultat"] in ("reussie", "ratee") and i["grammes"] and i["filament_id"]:
         total = i["grammes"] * (i["quantite"] or 1)
         db.executer("UPDATE filaments SET stock_g = MAX(0, stock_g - ?) WHERE id = ?", (total, i["filament_id"]))
         db.modifier("impressions", ident, {"stock_deduit": 1})
+    _occupation_machines_manuelles()
+
+
+def _occupation_machines_manuelles():
+    """Une machine sans connexion est « occupée » tant qu'une impression y est en cours, « libre » ensuite.
+    Maintenance et hors service ne sont jamais touchés."""
+    change = False
+    for m in db.tous("SELECT id, statut_manuel FROM machines WHERE pilote = 'manuel'"):
+        occupee = db.un("SELECT 1 FROM impressions WHERE machine_id = ? AND resultat = 'en_cours'", (m["id"],))
+        if m["statut_manuel"] not in ("libre", "occupee"):
+            continue
+        voulu = "occupee" if occupee else "libre"
+        if voulu != m["statut_manuel"]:
+            db.modifier("machines", m["id"], {"statut_manuel": voulu})
+            change = True
+    if change:
+        _synchro_parc()
+
+
+@app.post("/api/impressions/{ident}/lancer")
+def lancer_impression(ident: int):
+    """Une impression prévue part sur sa machine maintenant."""
+    i = _existe("impressions", ident)
+    if i["resultat"] != "prevue":
+        raise HTTPException(400, "seule une impression prévue peut être lancée")
+    db.modifier("impressions", ident, {"resultat": "en_cours", "debut": maintenant()})
+    _apres_impression(ident)
+    return _existe("impressions", ident)
+
+
+@app.post("/api/impressions/{ident}/terminer")
+def terminer_impression(ident: int, corps: dict):
+    """Fin d'une impression en un clic : {resultat: reussie | ratee | annulee, notes?}.
+    Durée laissée vide = estimation du trancheur (3MF) si elle existe, sinon temps écoulé depuis le début."""
+    i = _existe("impressions", ident)
+    resultat = corps.get("resultat")
+    if resultat not in ("reussie", "ratee", "annulee"):
+        raise HTTPException(400, "résultat attendu : reussie, ratee ou annulee")
+    if i["resultat"] not in ("prevue", "en_cours"):
+        raise HTTPException(400, "impression déjà terminée")
+    vals = {"resultat": resultat}
+    if corps.get("notes"):
+        vals["notes"] = "\n".join(x for x in (i["notes"], corps["notes"].strip()) if x)
+    if i["duree_min"] is None and i["resultat"] == "en_cours" and resultat != "annulee":
+        f = db.un("SELECT meta FROM fichiers WHERE id = ?", (i["fichier_id"],)) if i["fichier_id"] else None
+        estime = ((f or {}).get("meta") or {}).get("reglages_3mf", {}).get("duree_estimee_s")
+        if estime:
+            vals["duree_min"] = round(estime / 60 * (i["quantite"] or 1))
+        elif i["debut"]:
+            try:
+                vals["duree_min"] = max(1, round((datetime.now() - datetime.fromisoformat(i["debut"])).total_seconds() / 60))
+            except ValueError:
+                pass
+    db.modifier("impressions", ident, vals)
+    _apres_impression(ident)
+    return _existe("impressions", ident)
 
 
 _crud("machines", "nom", sortie=_masquer, apres=lambda i: _synchro_parc())
