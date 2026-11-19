@@ -73,6 +73,10 @@ CREATE TABLE IF NOT EXISTS impressions (
     stock_deduit INTEGER DEFAULT 0,           -- 1 quand les grammes ont été retirés du stock de filament
     notes TEXT DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS reglages (         -- voir reglages.py ; clé absente = valeur par défaut
+    cle TEXT PRIMARY KEY,
+    valeur TEXT NOT NULL                      -- JSON
+);
 """
 
 

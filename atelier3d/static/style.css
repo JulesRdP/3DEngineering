@@ -26,7 +26,30 @@ nav.cote { background: var(--surface); border-right: 1px solid var(--line); padd
 nav.cote a { text-decoration: none; padding: 8px 10px; border-radius: 6px; color: var(--muted); display: flex; gap: 10px; align-items: center; }
 nav.cote a:hover { background: var(--surface2); color: var(--fg); }
 nav.cote a.actif { background: var(--surface2); color: var(--fg); font-weight: 600; box-shadow: inset 3px 0 var(--accent); }
-nav.cote .pied { margin-top: auto; font-size: 12px; color: var(--muted); padding: 8px 10px; }
+nav.cote .pied { font-size: 12px; color: var(--muted); padding: 8px 10px; }
+nav.cote .reglages-lien { margin-top: auto; }
+/* page Réglages : sections à gauche, groupes en cartes, une ligne par réglage */
+.reglages { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 18px; align-items: start; }
+.reglages-menu { display: flex; flex-direction: column; gap: 2px; position: sticky; top: 16px; }
+.reglages-menu a { display: flex; justify-content: space-between; padding: 8px 10px; border-radius: 6px; text-decoration: none; color: var(--muted); }
+.reglages-menu a span { font-family: var(--mono); font-size: 11px; opacity: .7; }
+.reglages-menu a.actif { background: var(--surface2); color: var(--fg); font-weight: 600; box-shadow: inset 2px 0 0 var(--accent); }
+.reglages-contenu { display: flex; flex-direction: column; gap: 14px; }
+.reglage { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+.reglage-libelle label { font-weight: 500; }
+.reglage-champ { display: flex; align-items: center; gap: 8px; }
+.reglage-champ input[type=number] { width: 90px; text-align: right; }
+.reglage-champ input[type=text], .reglage-champ select { width: 220px; }
+.reglage-champ .unite { color: var(--muted); font-size: 12.5px; min-width: 14px; }
+#cherche-reglage { width: 260px; }
+.bascule { position: relative; display: inline-block; width: 40px; height: 22px; cursor: pointer; }
+.bascule input { opacity: 0; width: 0; height: 0; position: absolute; }
+.bascule span { position: absolute; inset: 0; background: var(--line); border-radius: 22px; transition: background .15s; }
+.bascule span::after { content: ""; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; border-radius: 50%; background: #fff; transition: transform .15s; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+.bascule input:checked + span { background: var(--accent); }
+.bascule input:checked + span::after { transform: translateX(18px); }
+.bascule input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 760px) { .reglages { grid-template-columns: 1fr; } .reglages-menu { flex-direction: row; position: static; overflow-x: auto; } .reglage { grid-template-columns: 1fr; } }
 main { padding: 24px clamp(16px, 3vw, 36px) 60px; min-width: 0; }
 @media (max-width: 760px) {
   .app { grid-template-columns: 1fr; }
@@ -74,8 +97,9 @@ label.champ .aide { font-size: 11.5px; }
 /* cartes projet */
 .projet { text-decoration: none; display: flex; flex-direction: column; padding: 0; overflow: hidden; }
 .projet:hover { border-color: var(--muted); }
-.projet .vignette { aspect-ratio: 16/10; background: var(--surface2); display: grid; place-items: center; color: var(--muted); font-family: var(--mono); font-size: 12px; max-width: 100%; }
-.projet .vignette img { width: 100%; height: 100%; object-fit: contain; }
+.projet .vignette { position: relative; overflow: hidden; aspect-ratio: 16/10; background: var(--surface2); display: grid; place-items: center; color: var(--muted); font-family: var(--mono); font-size: 12px; max-width: 100%; }
+/* image posée en absolu : sinon sa hauteur naturelle agrandit la vignette et la pièce déborde sur le titre */
+.projet .vignette img { position: absolute; inset: 8px; width: calc(100% - 16px); height: calc(100% - 16px); object-fit: contain; }
 .projet .corps { padding: 12px 14px; }
 .projet h3 { margin: 0 0 4px; font-size: 15px; }
 .etiquettes { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
@@ -117,7 +141,44 @@ tr.cliquable { cursor: pointer; } tr.cliquable:hover td { background: var(--surf
 .etiquettes-3d { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 .repere { position: absolute; left: 0; top: 0; width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: var(--accent-fg); font-weight: 700; font-size: 12.5px; display: grid; place-items: center; box-shadow: 0 0 0 2px var(--surface), 0 2px 6px rgba(0,0,0,.3); }
 .repere.statique { position: static; display: inline-grid; transform: none; }
-.plan-toile canvas { width: 100%; height: auto; display: block; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
+/* page Projets : un modèle 3D glissé sur la page crée un projet */
+#page.depot-actif { position: relative; }
+#page.depot-actif::after { content: "Déposer pour créer un projet avec ce modèle"; position: fixed; inset: 16px 16px 16px 226px; display: grid; place-items: center;
+  border: 2px dashed var(--accent); border-radius: 12px; background: color-mix(in srgb, var(--accent) 10%, rgba(0,0,0,.55)); color: #fff; font-size: 20px; font-weight: 600; pointer-events: none; z-index: 50; }
+.deux.plan-large { grid-template-columns: minmax(0, 1fr); }
+.visionneuse { position: relative; display: flex; flex-direction: column; gap: 8px; background: var(--surface); }
+.vis-corps { display: flex; gap: 8px; min-height: 0; flex: 1; }
+.vis-corps .vis-cadre { flex: 1; min-width: 0; }
+/* aperçu 3D sans fond ni cadre : la pièce flotte sur l'interface */
+.vis-apercu { display: none; width: 30%; min-width: 180px; max-width: 340px; flex-direction: column; background: transparent; }
+.visionneuse.avec-apercu .vis-apercu { display: flex; }
+.vis-apercu-titre { padding: 2px 4px 6px; font-size: 11.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.vis-apercu-titre .sous { text-transform: none; letter-spacing: 0; font-weight: 400; }
+/* feuille à l'écran sans fond : traits clairs sur l'interface sombre (le PDF et le PNG restent sur papier blanc) */
+.visionneuse.feuille-sombre { --plan-encre: #d6e0ea; }
+.visionneuse.feuille-sombre .vis-cadre { background: transparent; border-color: transparent; }
+.visionneuse.feuille-sombre .vis-feuille { background: transparent; box-shadow: none; outline: 1px solid rgba(255,255,255,.05); }
+.visionneuse.feuille-sombre .vis-feuille svg > g:first-of-type { stroke: var(--plan-encre); }
+.visionneuse.feuille-sombre .vis-feuille svg > g:last-of-type { fill: var(--plan-encre); }
+.vis-apercu-3d { position: relative; flex: 1; min-height: 160px; }
+.vis-apercu-3d canvas { width: 100% !important; height: 100% !important; display: block; }
+.vis-apercu-3d .calque { display: none; }
+.vis-vol { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 20; pointer-events: none; }
+.vis-barre { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.vis-zoom { min-width: 52px; text-align: center; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.vis-cadre { height: min(78vh, 62vw); overflow: auto; background: #d9dddb; border: 1px solid var(--line); border-radius: 4px; cursor: grab; touch-action: none; overscroll-behavior: contain; }
+.vis-cadre.prise { cursor: grabbing; }
+.vis-cadre.sur-vue { cursor: pointer; }
+/* feuille = fond blanc, puis la pièce 3D, puis les traits du dessin (SVG à fond transparent), puis le survol */
+.vis-feuille { position: relative; margin: 0 auto; background: #fff; box-shadow: 0 1px 6px rgba(0,0,0,.25); }
+.vis-feuille svg { position: relative; z-index: 2; display: block; user-select: none; }
+.vis-feuille svg .fond { fill: transparent; }
+.vis-3d { position: absolute; z-index: 1; pointer-events: none; }
+.vis-survol { position: absolute; z-index: 3; pointer-events: none; border: 1.5px solid var(--accent); border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 6%, transparent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent), 0 0 24px color-mix(in srgb, var(--accent) 35%, transparent); transition: all .12s ease-out; }
+.vis-survol span { position: absolute; top: -11px; left: 10px; background: var(--accent); color: var(--accent-fg); font: 700 11px/1 var(--mono, monospace); padding: 4px 7px; border-radius: 4px; letter-spacing: .08em; }
+.visionneuse:fullscreen { padding: 10px; }
+.visionneuse:fullscreen .vis-cadre { height: auto !important; flex: 1; }
 .choix-pieces { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; }
 .choix { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
 dl.infos { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0; font-size: 13px; }

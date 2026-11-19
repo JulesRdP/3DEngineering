@@ -26,6 +26,16 @@ async function api(chemin, options = {}) {
   return r.json();
 }
 
+const THREE_DEG = (d) => (d * Math.PI) / 180;
+
+// ---- réglages communs à l'atelier (liste rangée et valeurs par défaut : atelier3d/reglages.py)
+let reglagesCache = null;
+async function reglages(recharger = false) {
+  if (!reglagesCache || recharger) reglagesCache = await api("reglages");
+  return reglagesCache;
+}
+const reglage = async (cle) => (await reglages()).valeurs[cle];
+
 function toast(msg) {
   const t = document.createElement("div");
   t.className = "toast";
@@ -52,6 +62,8 @@ function champHtml(c, v) {
     entree = `<select name="${c.k}">${(c.options || []).map(([o, l]) => `<option value="${esc(o)}" ${String(o) === String(val) ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>`;
   } else if (c.t === "textarea") {
     entree = `<textarea name="${c.k}" rows="3">${esc(val)}</textarea>`;
+  } else if (c.t === "fichiers") {
+    entree = `<input name="${c.k}" type="file" multiple ${c.accept ? `accept="${esc(c.accept)}"` : ""}>`;
   } else {
     const type = { number: "number", color: "color", password: "password", datetime: "datetime-local" }[c.t] || "text";
     const extra = c.t === "number" ? `step="${c.pas || "any"}"` : "";
@@ -79,7 +91,7 @@ function formulaire({ titre, champs, valeurs = {}, valider = "Enregistrer", surC
       for (const c of champs) {
         const el = f.elements[c.k];
         if (!el) continue;
-        o[c.k] = c.t === "number" && el.value !== "" ? Number(el.value) : el.value;
+        o[c.k] = c.t === "fichiers" ? [...el.files] : c.t === "number" && el.value !== "" ? Number(el.value) : el.value;
       }
       return o;
     };
@@ -87,7 +99,13 @@ function formulaire({ titre, champs, valeurs = {}, valider = "Enregistrer", surC
     $("[data-annuler]", d).onclick = () => { d.close(); resoudre(null); };
     if (supprimer) $("[data-suppr]", d).onclick = () => { d.close(); resoudre({ __supprimer: true }); };
     f.onsubmit = (e) => { e.preventDefault(); d.close(); resoudre(lire()); };
-    d.onclose = () => resoudre(null);
+    d.onclose = fermeture(d, () => resoudre(null));
+    // champ fichiers pré-rempli (fichiers déposés sur la page avant d'ouvrir le formulaire)
+    for (const c of champs.filter((c) => c.t === "fichiers" && valeurs[c.k]?.length)) {
+      const dt = new DataTransfer();
+      for (const fi of valeurs[c.k]) dt.items.add(fi);
+      f.elements[c.k].files = dt.files;
+    }
     d.showModal();
   });
 }
@@ -99,9 +117,16 @@ function confirmer(message) {
       <div class="bas"><button type="button" class="btn" data-non>Annuler</button><button class="btn prim danger" value="ok">Confirmer</button></div></form>`;
     $("[data-non]", d).onclick = () => { d.close(); resoudre(false); };
     $("form", d).onsubmit = (e) => { e.preventDefault(); d.close(); resoudre(true); };
-    d.onclose = () => resoudre(false);
+    d.onclose = fermeture(d, () => resoudre(false));
     d.showModal();
   });
+}
+
+// L'événement « close » d'une <dialog> est différé (tâche). Quand un formulaire enchaîne sur une confirmation
+// (bouton Supprimer), la même boîte est déjà rouverte quand ce « close » peut arriver : selon le navigateur, il
+// annulerait aussitôt la confirmation. On l'ignore donc si la boîte est de nouveau ouverte.
+function fermeture(d, annuler) {
+  return () => { if (!d.open) annuler(); };
 }
 
 // ------------------------------------------------------------------ définitions des formulaires
@@ -311,7 +336,7 @@ pages.projets = async (params) => {
   const q = params.get("q") || "";
   const projets = await api("projets?q=" + encodeURIComponent(q));
   page.innerHTML = `
-    <div class="entete"><div><h1>Projets</h1><div class="sous">${projets.length} projet(s)</div></div>
+    <div class="entete"><div><h1>Projets</h1><div class="sous">${projets.length} projet(s) · glisser un modèle 3D sur la page pour créer un projet</div></div>
       <div class="actions"><input class="recherche" type="search" placeholder="Rechercher (nom, étiquette, fichier)" value="${esc(q)}" id="rech"><button class="btn prim" id="nouv">Nouveau projet</button></div></div>
     <div class="grille">${projets.map((p) => `
       <a class="carte projet" href="#/projet/${p.id}">
@@ -322,10 +347,54 @@ pages.projets = async (params) => {
         </div></a>`).join("") || `<div class="vide">Aucun projet${q ? " pour cette recherche" : ""}.</div>`}</div>`;
   let attente;
   $("#rech").oninput = (e) => { clearTimeout(attente); attente = setTimeout(() => (location.hash = "#/projets?q=" + encodeURIComponent(e.target.value)), 350); };
-  const creer = () => editer("projets", champsProjet(), null, (p) => p && (location.hash = "#/projet/" + p.id));
-  $("#nouv").onclick = creer;
-  if (params.has("nouveau")) creer();
+  $("#nouv").onclick = () => creerProjet();
+  if (params.has("nouveau")) creerProjet();
+  // glisser un modèle 3D n'importe où sur la page : nouveau projet à son nom, avec le fichier
+  page.ondragover = (e) => { if ([...e.dataTransfer.types].includes("Files")) { e.preventDefault(); page.classList.add("depot-actif"); } };
+  page.ondragleave = (e) => { if (!page.contains(e.relatedTarget)) page.classList.remove("depot-actif"); };
+  page.ondrop = (e) => {
+    e.preventDefault();
+    page.classList.remove("depot-actif");
+    const fichiers = [...e.dataTransfer.files];
+    if (fichiers.length) creerProjet({ nom: nomDepuisFichier(fichiers), fichiers });
+  };
 };
+
+// ---- création d'un projet, avec ses modèles 3D et autres fichiers d'emblée
+const FORMATS_DEPOT = ".stl,.3mf,.obj,.step,.stp,.f3d,.scad,.fs,.gcode,.bgcode,.pdf,.png,.jpg,.jpeg,.webp,.svg";
+const MODELES_3D = ["stl", "3mf", "obj"];
+
+// « support_moteur-v2.stl » → « support moteur v2 »
+function nomDepuisFichier(fichiers) {
+  const modele = fichiers.find((f) => /\.(stl|3mf|obj|step|stp)$/i.test(f.name)) || fichiers[0];
+  return modele.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim();
+}
+
+async function creerProjet(prerempli = {}) {
+  const r = await formulaire({
+    titre: "Nouveau projet", valider: "Créer le projet", valeurs: { statut: "en_cours", ...prerempli },
+    // le nom peut rester vide : il est alors tiré du modèle déposé
+    champs: [...champsProjet().map((c) => (c.k === "nom" ? { ...c, requis: false, ph: "vide : nom du modèle 3D" } : c)), { k: "fichiers", l: "Modèle 3D et autres fichiers (facultatif)", t: "fichiers", accept: FORMATS_DEPOT, large: true,
+      aide: "STL, 3MF, OBJ, STEP, G-code, plans PDF, photos… Analysés dès le dépôt (dimensions, formes, miniature)." }],
+  });
+  if (!r) return;
+  const { fichiers = [], ...valeurs } = r;
+  if (!valeurs.nom?.trim()) valeurs.nom = fichiers.length ? nomDepuisFichier(fichiers) : "Nouveau projet";
+  try {
+    const p = await api("projets", { method: "POST", body: valeurs });
+    let deposes = [];
+    if (fichiers.length) {
+      const fd = new FormData();
+      for (const fi of fichiers) fd.append("fichiers", fi);
+      try { deposes = await api(`projets/${p.id}/fichiers`, { method: "POST", body: fd }); }
+      catch (e) { toast(`Projet créé, mais dépôt des fichiers impossible : ${e.message}`); }
+    }
+    toast(`Projet « ${p.nom} » créé${deposes.length ? ` avec ${deposes.length} fichier(s)` : ""}`);
+    // une seule pièce 3D : on l'ouvre directement (vue 3D, plan…), sinon la page du projet
+    const pieces = deposes.filter((x) => MODELES_3D.includes(x.type));
+    location.hash = pieces.length === 1 ? `#/fichier/${pieces[0].id}` : `#/projet/${p.id}`;
+  } catch (e) { toast("Erreur : " + e.message); }
+}
 
 pages.projet = async (params, id) => {
   const [p, fichiers] = await Promise.all([api("projets/" + id), api(`projets/${id}/fichiers`)]);
@@ -347,7 +416,7 @@ pages.projet = async (params, id) => {
   page.innerHTML = `
     <div class="fil"><a href="#/projets">Projets</a> /</div>
     <div class="entete"><div><h1>${esc(p.nom)}</h1><div class="sous">${pastille(STATUTS_PROJET[p.statut] || [p.statut, "p-neutre"])} · modifié le ${date(p.modifie)}</div></div>
-      <div class="actions">${p.lien_cao ? `<a class="btn" href="${esc(p.lien_cao)}" target="_blank" rel="noopener">Ouvrir la CAO</a>` : ""}<button class="btn" id="modif">Modifier</button></div></div>
+      <div class="actions">${p.lien_cao ? `<a class="btn" href="${esc(p.lien_cao)}" target="_blank" rel="noopener">Ouvrir la CAO</a>` : ""}<button class="btn" id="modif">Modifier</button><button class="btn danger" id="suppr-projet">Supprimer</button></div></div>
     <div class="deux">
       <div class="pile">
         ${fichiers.some((f) => ["stl", "3mf"].includes(f.type)) ? `<section class="carte"><h2>Aperçu 3D du projet</h2>
@@ -371,6 +440,15 @@ pages.projet = async (params, id) => {
       </div>
     </div>`;
   $("#modif").onclick = () => editer("projets", champsProjet(), p, (r) => (r ? route() : (location.hash = "#/projets")));
+  $("#suppr-projet").onclick = async () => {
+    const n = fichiers.length;
+    if (!(await confirmer(`Supprimer le projet « ${p.nom} »${n ? ` et ses ${n} fichier(s) (effacés du disque)` : ""} ? L'historique des impressions est conservé.`))) return;
+    try {
+      await api("projets/" + id, { method: "DELETE" });
+      toast(`Projet « ${p.nom} » supprimé`);
+      location.hash = "#/projets";
+    } catch (e) { toast("Erreur : " + e.message); }
+  };
   const envoyer = async (liste) => {
     if (!liste.length) return;
     const fd = new FormData();
@@ -437,8 +515,10 @@ pages.fichier = async (params, id) => {
           ${["stl", "3mf"].includes(f.type) ? `<section class="carte" style="margin-top:12px"><div class="entete" style="margin-bottom:8px"><h2 style="margin:0">Repères</h2>
             <button class="btn petit" id="poser">Poser un repère</button></div><div id="liste-reperes"></div></section>` : ""}</div>
         <div id="panneau-plan" hidden><div class="carte"><div class="actions" style="margin-bottom:10px">
-          <button class="btn" id="plan-png">Télécharger le plan (PNG)</button><button class="btn" id="plan-garder">Enregistrer dans le projet</button>
-          <span class="sous">Vues à l'échelle commune, cotes d'encombrement, repères de la vue 3D.</span></div><div id="plan-toile" class="plan-toile"></div></div></div>
+          <button class="btn prim" id="plan-pdf">Télécharger le plan (PDF)</button><button class="btn" id="plan-png">PNG</button>
+          <button class="btn" id="plan-garder">Enregistrer le PDF dans le projet</button><button class="btn" id="plan-cartouche">Cartouche…</button></div>
+          <div class="onglets" id="plan-feuilles" style="flex-wrap:wrap;margin-bottom:10px"></div>
+          <div id="plan-toile" class="plan-toile"><div class="vide">Génération du plan…</div></div></div></div>
         ${f.notes ? `<section class="carte"><h2>Notes</h2><div style="white-space:pre-wrap">${esc(f.notes)}</div></section>` : ""}
         <section class="carte"><h2>Historique d'impression</h2>${tableImpressions(f.impressions.map((i) => ({ ...i, machine_nom: machines.find((x) => x.id === i.machine_id)?.nom })), false)}</section>
       </div>
@@ -550,34 +630,127 @@ async function afficher(f, m) {
   });
 
   // onglet Plan : généré à la demande
-  let toile = null;
+  let feuilles = [], courante = 0, visionneuse = null, apparition = null, apercu3d = null, cartouche = m.cartouche || {};
   const sansExt = f.nom.replace(/\.(stl|3mf)$/i, "");
+  // réglages de l'animation (page Réglages › Plans), relus à chaque clic : un changement s'applique tout de suite
+  const optionsAnimation = async () => {
+    const r = (await reglages()).valeurs;
+    return { dureeVol: r["plans.piece.duree_vol"] * 1000, tour: r["plans.piece.tour"], effacement: r["plans.piece.effacement"] * 1000, opacite: r["plans.piece.opacite"] / 100 };
+  };
+  // aperçu 3D à côté du plan, manipulable ; la pièce en sort quand on clique sur une vue
+  const ouvrirApercu = async () => {
+    if (apercu3d || !visionneuse.apercuOuvert) return;
+    const { Vue3D } = await import("/static/vision.js");
+    const calque = document.createElement("div");
+    calque.className = "calque";
+    visionneuse.apercu.append(calque);
+    apercu3d = new Vue3D(visionneuse.apercu, calque);
+    await apercu3d.ajouter(f.id, `/api/fichiers/${f.id}/contenu`, f.type);
+    apercu3d.cadrer();
+    apercu3d.decor.visible = false;   // ni grille ni axes : la pièce flotte sur l'interface
+    // cadrage : la sphère qui englobe la pièce tient dans le champ le plus étroit du panneau (étroit et haut)
+    const cadrerApercu = () => {
+      apercu3d.ajuster();
+      const cam = apercu3d.camera, cible = apercu3d.ctl.target;
+      const rayon = apercu3d.boite().getSize(cam.position.clone()).length() / 2 || 10;
+      const demiV = THREE_DEG(cam.fov) / 2, demiH = Math.atan(Math.tan(demiV) * (cam.aspect || 1));
+      const dist = (rayon * 1.1) / Math.sin(Math.min(demiV, demiH));
+      cam.position.sub(cible).setLength(dist).add(cible);
+      apercu3d.ctl.update();
+      apercu3d.rendu.render(apercu3d.scene, cam);   // image tout de suite, sans attendre la boucle
+    };
+    cadrerApercu();
+    new ResizeObserver(() => { if (visionneuse.apercu.clientWidth > 20 && !apparition?.enVol) cadrerApercu(); }).observe(visionneuse.apercu);
+  };
+  const montrerFeuille = async (i) => {
+    courante = i;
+    if (!visionneuse) {
+      const { VisionneusePlan } = await import("/static/visionneuse.js");
+      visionneuse = new VisionneusePlan($("#plan-toile"), { apercuOuvert: await reglage("plans.apercu.ouvert"), feuilleSombre: (await reglage("plans.ecran.feuille")) === "Sans fond" });
+      // clic sur une vue du plan : la pièce sort de l'aperçu et vient se poser sous le dessin
+      visionneuse.surVue = async (v) => {
+        if (!v) return apparition?.cacher();
+        if (!apparition) {
+          const { ApparitionPiece } = await import("/static/apparition3d.js");
+          apparition = new ApparitionPiece(visionneuse, vue.visibles(), {
+            source: () => (visionneuse.apercuOuvert && apercu3d ? { rect: apercu3d.rendu.domElement.getBoundingClientRect(), camera: apercu3d.camera, objet: apercu3d.objets.get(f.id) } : null),
+          });
+        }
+        apparition.regler(await optionsAnimation());
+        apparition.montrer(v);
+      };
+      visionneuse.surZoom = () => apparition?.placer();
+      visionneuse.surApercu = (ouvert) => { if (!ouvert) apparition?.retirer(); ouvrirApercu(); };
+      ouvrirApercu();
+    }
+    apparition?.retirer();
+    visionneuse.montrer(feuilles[i].rendreSVG(), feuilles[i].largeur, feuilles[i].hauteur, feuilles[i].infos?.vues || []);
+    $$("#plan-feuilles button").forEach((b, k) => b.classList.toggle("actif", k === i));
+  };
+  // champs du cartouche : saisis (meta.cartouche) + déduits du fichier et du projet
+  const infosCartouche = async () => {
+    const [p, filaments, { valeurs: r }] = await Promise.all([api("projets/" + f.projet_id), api("filaments"), reglages()]);
+    const fil = filaments.find((x) => String(x.id) === String(cartouche.filament_id));
+    return {
+      // valeurs par défaut de la page Réglages, puis celles saisies pour ce plan
+      societe: r["plans.cartouche.societe"], tolerance: r["plans.cartouche.tolerance"], dessinateur: r["plans.cartouche.dessinateur"],
+      indice: "A", numero: `A3D-${f.projet_id}-${f.id}`, ...cartouche,
+      designation: sansExt + (f.variante ? ` (${f.variante})` : ""), projet: p.nom, date: new Date(f.cree).toLocaleDateString("fr-FR"),
+      masse: fil && m.volume_mm3 ? `${nb((m.volume_mm3 / 1000) * (fil.densite || 1.24))} g (plein)` : "",
+    };
+  };
   const genererPlan = async () => {
     const { dessinerPlan } = await import("/static/plan.js");
-    const p = await api("projets/" + f.projet_id);
-    toile = dessinerPlan(vue.visibles(), { titre: sansExt + (f.variante ? ` (${f.variante})` : ""), projet: p.nom, reperes });
-    $("#plan-toile").replaceChildren(toile);
+    feuilles = dessinerPlan(vue.visibles(), { reperes, formes: m.formes, cartouche: await infosCartouche() });
+    $("#plan-feuilles").innerHTML = feuilles.length > 1 ? feuilles.map((t, i) => `<button data-feuille="${i}">Feuille ${i + 1} · ${esc(t.titre || "")}</button>`).join("") : "";
+    $$("#plan-feuilles button").forEach((b) => (b.onclick = () => montrerFeuille(+b.dataset.feuille)));
+    await montrerFeuille(Math.min(courante, feuilles.length - 1));
+  };
+  const pdfPlan = async () => {
+    const { pdfDepuisFeuilles } = await import("/static/pdf.js");
+    return pdfDepuisFeuilles(feuilles, { titre: sansExt });
+  };
+  $("#plan-cartouche").onclick = async () => {
+    const filaments = await api("filaments");
+    const r = await formulaire({
+      titre: "Cartouche du plan", valeurs: { ...(await infosCartouche()), ...cartouche }, champs: [
+        { k: "dessinateur", l: "Dessiné par" }, { k: "verificateur", l: "Vérifié par" }, { k: "date_verif", l: "Date de vérification", ph: "jj/mm/aaaa" },
+        { k: "filament_id", l: "Matière (filament, pour la masse)", t: "select", options: [["", "— saisie libre ci-dessous —"], ...filaments.map((x) => [x.id, `${x.matiere} ${x.marque} ${x.couleur}`.trim()])] },
+        { k: "matiere", l: "Matière (texte)", ph: "PLA, PETG…" }, { k: "numero", l: "N° de plan" }, { k: "indice", l: "Indice de révision" },
+        { k: "tolerance", l: "Tolérances générales", ph: "ISO 2768-m" }, { k: "societe", l: "Organisme" }],
+    });
+    if (!r) return;
+    if (r.filament_id) delete r.matiere;   // la matière suit le filament choisi
+    cartouche = await api(`fichiers/${f.id}/cartouche`, { method: "PUT", body: r });
+    await genererPlan();
   };
   $$("[data-onglet]").forEach((b) => (b.onclick = async () => {
     $$("[data-onglet]").forEach((x) => x.classList.toggle("actif", x === b));
     const plan = b.dataset.onglet === "plan";
     $("#panneau-3d").hidden = plan;
     $("#panneau-plan").hidden = !plan;
+    $(".deux", page)?.classList.toggle("plan-large", plan);   // le plan prend toute la largeur
     if (plan) await genererPlan();
   }));
-  $("#plan-png").onclick = () => {
+  const telecharger = (href, nom) => {
     const a = document.createElement("a");
-    a.href = toile.toDataURL("image/png");
-    a.download = `plan-${sansExt}.png`;
+    a.href = href;
+    a.download = nom;
     a.click();
   };
-  $("#plan-garder").onclick = () => toile.toBlob(async (blob) => {
+  $("#plan-png").onclick = () => telecharger(feuilles[courante].rendreCanvas(200 / 25.4).toDataURL("image/png"), `plan-${sansExt}${feuilles.length > 1 ? "-feuille" + (courante + 1) : ""}.png`);
+  $("#plan-pdf").onclick = async () => {
+    const url = URL.createObjectURL(await pdfPlan());
+    telecharger(url, `plan-${sansExt}.pdf`);
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  };
+  $("#plan-garder").onclick = async () => {
     const fd = new FormData();
-    fd.append("fichiers", blob, `plan-${sansExt}.png`);
+    fd.append("fichiers", await pdfPlan(), `plan-${sansExt}.pdf`);
     fd.append("role", "plan"); fd.append("parent_id", f.id); fd.append("variante", "plan");
     await api(`projets/${f.projet_id}/fichiers`, { method: "POST", body: fd });
     toast("Plan enregistré dans le projet (Plans et documents)");
-  }, "image/png");
+  };
   if (new URLSearchParams(location.hash.split("?")[1] || "").has("plan")) $('[data-onglet="plan"]').click();
 }
 
@@ -602,14 +775,14 @@ pages.machines = async () => {
 
 // ---- filaments
 pages.filaments = async () => {
-  const fil = await api("filaments");
+  const [fil, seuil] = await Promise.all([api("filaments"), reglage("general.filaments.stock_bas")]);
   page.innerHTML = `
     <div class="entete"><div><h1>Filaments</h1><div class="sous">Stock et caractéristiques · ${nb(fil.reduce((s, f) => s + (f.stock_g || 0), 0) / 1000, 2)} kg en stock</div></div>
       <div class="actions"><button class="btn prim" id="nouv">Ajouter un filament</button></div></div>
     <section class="carte"><div class="tab-cont"><table><thead><tr><th>Filament</th><th>Matière</th><th>Buse / plateau</th><th>Densité</th><th>Stock</th><th>Prix</th></tr></thead><tbody>
       ${fil.map((f) => `<tr class="cliquable" data-id="${f.id}"><td><span class="pastille-couleur" style="background:${esc(f.couleur_hex)}"></span>${esc(f.marque)} ${esc(f.couleur)}</td><td>${esc(f.matiere)}</td>
         <td class="num">${f.temp_buse ?? "–"} / ${f.temp_plateau ?? "–"} °C</td><td class="num">${nb(f.densite, 2)}</td>
-        <td class="num">${nb(f.stock_g, 0)} g ${f.stock_g < 200 ? pastille(["bas", "p-warn"]) : ""}</td><td class="num">${nb(f.prix_kg, 2)} €/kg</td></tr>`).join("") || `<tr><td colspan="6" class="vide">Aucun filament</td></tr>`}
+        <td class="num">${nb(f.stock_g, 0)} g ${f.stock_g < seuil ? pastille(["bas", "p-warn"]) : ""}</td><td class="num">${nb(f.prix_kg, 2)} €/kg</td></tr>`).join("") || `<tr><td colspan="6" class="vide">Aucun filament</td></tr>`}
     </tbody></table></div></section>`;
   $("#nouv").onclick = () => editer("filaments", champsFilament(), null, () => route());
   $$("tr[data-id]").forEach((tr) => (tr.onclick = () => editer("filaments", champsFilament(), fil.find((x) => x.id == tr.dataset.id), () => route())));
@@ -653,8 +826,71 @@ pages.impressions = async () => {
 };
 
 // ------------------------------------------------------------------ routeur
+// ---- réglages : page construite depuis la liste du serveur, enregistrement à chaque changement
+pages.reglages = async (params) => {
+  const { sections, valeurs } = await reglages(true);
+  const courante = sections.some((s) => s.id === params.get("section")) ? params.get("section") : sections[0].id;
+  const defauts = Object.fromEntries(sections.flatMap((s) => s.groupes.flatMap((g) => g.reglages)).map((r) => [r.cle, r.defaut]));
+  const champ = (r) => {
+    const v = valeurs[r.cle], id = `r-${r.cle.replace(/\./g, "-")}`;
+    if (r.type === "booleen") return `<label class="bascule"><input type="checkbox" id="${id}" data-cle="${r.cle}" ${v ? "checked" : ""}><span></span></label>`;
+    if (r.type === "choix") return `<select id="${id}" data-cle="${r.cle}">${r.choix.map((c) => `<option ${c === v ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>`;
+    if (r.type === "nombre") return `<input type="number" id="${id}" data-cle="${r.cle}" value="${v}" min="${r.min}" max="${r.max}" step="${r.pas || "any"}"><span class="unite">${esc(r.unite || "")}</span>`;
+    return `<input type="text" id="${id}" data-cle="${r.cle}" value="${esc(v)}" maxlength="${r.max || 200}">`;
+  };
+  const texteDefaut = (r) => (r.type === "booleen" ? (r.defaut ? "oui" : "non") : `${r.defaut}${r.unite ? " " + r.unite : ""}` || "vide");
+  page.innerHTML = `
+    <div class="entete"><div><h1>Réglages</h1><div class="sous">Communs à tous les postes de l'atelier · enregistrés dès qu'on les change</div></div>
+      <div class="actions"><input type="search" id="cherche-reglage" placeholder="Chercher un réglage…" autocomplete="off"></div></div>
+    <div class="reglages">
+      <nav class="reglages-menu">${sections.map((s) => `<a href="#/reglages?section=${s.id}" data-section="${s.id}" class="${s.id === courante ? "actif" : ""}">${esc(s.titre)}<span>${s.groupes.reduce((n, g) => n + g.reglages.length, 0)}</span></a>`).join("")}</nav>
+      <div class="reglages-contenu">${sections.map((s) => s.groupes.map((g) => `
+        <section class="carte groupe-reglages" data-section="${s.id}">
+          <h2>${esc(g.titre)}</h2>${g.aide ? `<div class="sous" style="margin:-6px 0 10px">${esc(g.aide)}</div>` : ""}
+          ${g.reglages.map((r) => `<div class="reglage" data-cle="${r.cle}" data-texte="${esc((s.titre + " " + g.titre + " " + r.libelle + " " + (r.aide || "")).toLowerCase())}">
+            <div class="reglage-libelle"><label for="r-${r.cle.replace(/\./g, "-")}">${esc(r.libelle)}</label>${r.aide ? `<div class="sous">${esc(r.aide)}</div>` : ""}</div>
+            <div class="reglage-champ">${champ(r)}<button class="btn petit" data-defaut="${r.cle}" title="Revenir à la valeur par défaut (${esc(texteDefaut(r))})" ${valeurs[r.cle] === r.defaut ? "hidden" : ""}>↺</button></div>
+          </div>`).join("")}
+        </section>`).join("")).join("")}
+        <div class="vide" id="aucun-reglage" hidden>Aucun réglage ne correspond.</div>
+      </div>
+    </div>`;
+  // une section à la fois, ou tout ce qui correspond à la recherche
+  const filtrer = () => {
+    const q = $("#cherche-reglage").value.trim().toLowerCase();
+    let visibles = 0;
+    $$(".groupe-reglages").forEach((g) => {
+      let n = 0;
+      $$(".reglage", g).forEach((l) => { const ok = q ? l.dataset.texte.includes(q) : g.dataset.section === courante; l.hidden = !ok; n += ok; });
+      g.hidden = !n;
+      visibles += n;
+    });
+    $("#aucun-reglage").hidden = visibles > 0;
+  };
+  $("#cherche-reglage").oninput = filtrer;
+  filtrer();
+  const enregistrer = async (cle, valeur) => {
+    try {
+      const r = await api("reglages", { method: "PUT", body: { [cle]: valeur } });
+      reglagesCache.valeurs = r.valeurs;
+      const el = $(`[data-cle="${cle}"]`, page);
+      if (el.type === "checkbox") el.checked = r.valeurs[cle]; else el.value = r.valeurs[cle];
+      $(`[data-defaut="${cle}"]`).hidden = r.valeurs[cle] === defauts[cle];
+      toast(valeur === null ? "Valeur par défaut rétablie" : "Réglage enregistré");
+    } catch (e) {
+      toast("Refusé : " + e.message);
+      const el = $(`[data-cle="${cle}"]`, page);
+      if (el.type === "checkbox") el.checked = reglagesCache.valeurs[cle]; else el.value = reglagesCache.valeurs[cle];
+    }
+  };
+  $$("[data-cle]", page).forEach((el) => (el.onchange = () => enregistrer(el.dataset.cle, el.type === "checkbox" ? el.checked : el.type === "number" ? Number(el.value) : el.value)));
+  $$("[data-defaut]").forEach((b) => (b.onclick = () => enregistrer(b.dataset.defaut, null)));
+};
+
 async function route() {
   clearInterval(minuterie); clearTimeout(minuterie);
+  page.ondragover = page.ondragleave = page.ondrop = null;   // glisser-déposer propre à chaque page
+  page.classList.remove("depot-actif");
   const [chemin, requete] = location.hash.replace(/^#\/?/, "").split("?");
   const [nom, id] = chemin.split("/");
   $$("nav.cote a[data-route]").forEach((a) => a.classList.toggle("actif", a.dataset.route === (nom === "projet" || nom === "fichier" ? "projets" : nom)));

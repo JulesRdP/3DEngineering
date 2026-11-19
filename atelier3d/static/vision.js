@@ -17,7 +17,16 @@ export async function chargerObjet(url, type) {
         geo.computeVertexNormals();
         return new THREE.Mesh(geo);
       }
-      return new ThreeMFLoader().parse(donnees);
+      // Le chargeur 3MF ne calcule pas de normales (il compte sur le « flatShading » de ses propres matériaux) ;
+      // or on remplace ces matériaux : sans normales, l'éclairage ne marche pas et la pièce sort toute noire.
+      // On calcule donc des normales par face, comme pour un STL (arêtes vives nettes, reliefs visibles).
+      const obj = new ThreeMFLoader().parse(donnees);
+      obj.traverse((o) => {
+        if (!o.isMesh || o.geometry.attributes.normal) return;
+        if (o.geometry.index) o.geometry = o.geometry.toNonIndexed();
+        o.geometry.computeVertexNormals();
+      });
+      return obj;
     })());
   }
   return (await cache.get(url)).clone();

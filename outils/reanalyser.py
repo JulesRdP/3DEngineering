@@ -13,8 +13,9 @@ for f in A.db.tous("SELECT * FROM fichiers"):
         A.MINIATURES.mkdir(parents=True, exist_ok=True)
         (A.MINIATURES / f"{f['id']}.png").write_bytes(mini)
         meta["miniature"] = True
-    if f["meta"].get("reperes"):
-        meta["reperes"] = f["meta"]["reperes"]  # on garde les repères posés à la main
+    for cle in ("reperes", "cartouche"):  # saisis à la main : on les garde
+        if f["meta"].get(cle):
+            meta[cle] = f["meta"][cle]
     meta["analyse"] = "faite"
     A.db.modifier("fichiers", f["id"], {"meta": json.dumps(meta)})
     print(f["id"], f["nom"], "miniature" if mini else "")

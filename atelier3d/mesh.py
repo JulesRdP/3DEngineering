@@ -9,6 +9,8 @@ import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from .formes import reconnaitre
+
 IDENTITE = (1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)  # matrice 3MF : m00 m01 m02 m10 m11 m12 m20 m21 m22 m30 m31 m32
 
 
@@ -292,14 +294,28 @@ def miniature_3mf(zf: zipfile.ZipFile):
     return None
 
 
+def _ajouter_formes(bilan, tris):
+    """Formes reconnues pour la cotation des plans ; une erreur ici ne doit pas faire échouer l'analyse."""
+    try:
+        formes = reconnaitre(tris)
+    except Exception as e:
+        bilan["erreur_formes"] = str(e)[:200]
+        return
+    if formes:
+        bilan["formes"] = formes
+
+
 def analyser_3mf(chemin: Path):
     with zipfile.ZipFile(chemin) as zf:
         tris = list(triangles_3mf(zf))
         bilan = _bilan(tris)
+        _ajouter_formes(bilan, tris)
         reglages = _reglages_trancheur(zf)
         if reglages:
             bilan["reglages_3mf"] = reglages
-        return bilan, miniature_3mf(zf) or miniature(tris)
+        # notre rendu d'abord, pour que toutes les miniatures aient le même style ; la vignette enregistrée par
+        # le logiciel d'origine (SolidWorks, Bambu Studio...) ne sert que si le fichier n'a pas de géométrie lisible
+        return bilan, (miniature(tris) if tris else None) or miniature_3mf(zf)
 
 
 # ---------------------------------------------------------------- G-code
@@ -348,7 +364,9 @@ def analyser(chemin: Path, typ: str):
     try:
         if typ == "stl":
             tris = list(triangles_stl(chemin.read_bytes()))
-            return _bilan(tris), miniature(tris)
+            bilan = _bilan(tris)
+            _ajouter_formes(bilan, tris)
+            return bilan, miniature(tris)
         if typ == "3mf":
             return analyser_3mf(chemin)
         if typ == "gcode" and chemin.suffix.lower() == ".gcode":

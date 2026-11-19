@@ -1,57 +1,5 @@
-import io
-import struct
-import time
-import zipfile
-
-import pytest
-
-
-@pytest.fixture()
-def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("ATELIER3D_DONNEES", str(tmp_path))
-    import importlib
-
-    import atelier3d.app as A
-    importlib.reload(A)
-    from fastapi.testclient import TestClient
-    with TestClient(A.app) as c:
-        yield c
-
-
-def cube_stl(cote=10.0):
-    """Cube binaire, 12 triangles, normales sortantes."""
-    s = cote
-    v = [(0, 0, 0), (s, 0, 0), (s, s, 0), (0, s, 0), (0, 0, s), (s, 0, s), (s, s, s), (0, s, s)]
-    faces = [(0, 2, 1), (0, 3, 2), (4, 5, 6), (4, 6, 7), (0, 1, 5), (0, 5, 4),
-             (1, 2, 6), (1, 6, 5), (2, 3, 7), (2, 7, 6), (3, 0, 4), (3, 4, 7)]
-    out = bytearray(b"\0" * 80) + struct.pack("<I", len(faces))
-    for a, b, c in faces:
-        out += struct.pack("<12fH", 0, 0, 0, *v[a], *v[b], *v[c], 0)
-    return bytes(out)
-
-
-def cube_3mf():
-    pts = "".join(f'<vertex x="{x}" y="{y}" z="{z}"/>' for x, y, z in
-                  [(0, 0, 0), (20, 0, 0), (20, 20, 0), (0, 20, 0), (0, 0, 5), (20, 0, 5), (20, 20, 5), (0, 20, 5)])
-    tris = "".join(f'<triangle v1="{a}" v2="{b}" v3="{c}"/>' for a, b, c in
-                   [(0, 2, 1), (0, 3, 2), (4, 5, 6), (4, 6, 7), (0, 1, 5), (0, 5, 4), (1, 2, 6), (1, 6, 5), (2, 3, 7), (2, 7, 6), (3, 0, 4), (3, 4, 7)])
-    modele = (f'<?xml version="1.0"?><model unit="millimeter" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">'
-              f'<resources><object id="1" type="model"><mesh><vertices>{pts}</vertices><triangles>{tris}</triangles></mesh></object></resources>'
-              f'<build><item objectid="1" transform="1 0 0 0 1 0 0 0 1 100 100 0"/></build></model>')
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as z:
-        z.writestr("3D/3dmodel.model", modele)
-        z.writestr("Metadata/project_settings.config", '{"printer_model": "Bambu Lab A1 mini", "layer_height": "0.2"}')
-    return buf.getvalue()
-
-
-def attendre_analyse(client, fid):
-    for _ in range(50):
-        f = client.get(f"/api/fichiers/{fid}").json()
-        if f["meta"].get("analyse") == "faite":
-            return f
-        time.sleep(0.1)
-    raise AssertionError("analyse non terminée")
+"""Parcours de bout en bout par l'API : projets, fichiers, variations, compatibilité, impressions, stock."""
+from conftest import attendre_analyse, cube_3mf, cube_stl, deposer, png_uni
 
 
 def test_parcours_complet(client):
@@ -102,6 +50,47 @@ def test_3mf_transforme_et_reglages(client):
     assert f["meta"]["dimensions"] == [20, 20, 5]
     assert f["meta"]["min"] == [100, 100, 0]
     assert f["meta"]["reglages_3mf"]["imprimante"] == "Bambu Lab A1 mini"
+
+
+def test_3mf_miniature_dans_le_style_de_l_atelier(client):
+    """La vignette enregistrée dans le 3MF (SolidWorks, Bambu Studio...) ne remplace pas notre rendu :
+    toutes les miniatures ont le même style (pièce orange ombrée sur fond transparent)."""
+    from atelier3d.mesh import miniature, triangles_3mf
+    import io
+    import zipfile
+    etrangere = png_uni()
+    contenu = cube_3mf(vignette=etrangere)
+    p = client.post("/api/projets", json={"nom": "3MF SolidWorks"}).json()
+    f = deposer(client, p["id"], "piece.3mf", contenu)
+    assert f["meta"]["miniature"] is True
+    mini = client.get(f"/api/fichiers/{f['id']}/miniature").content
+    assert mini != etrangere, "la vignette du logiciel d'origine a été reprise telle quelle"
+    tris = list(triangles_3mf(zipfile.ZipFile(io.BytesIO(contenu))))
+    assert mini == miniature(tris), "même rendu que pour un STL"
+
+
+def test_3mf_sans_geometrie_garde_sa_vignette(client):
+    """Faute de géométrie lisible, la vignette du fichier vaut mieux que pas de miniature du tout."""
+    etrangere = png_uni((0, 200, 0))
+    p = client.post("/api/projets", json={"nom": "3MF vide"}).json()
+    f = deposer(client, p["id"], "vide.3mf", cube_3mf(vignette=etrangere, geometrie=False))
+    assert client.get(f"/api/fichiers/{f['id']}/miniature").content == etrangere
+
+
+def test_suppression_projet_importe(client):
+    """Un projet créé par import (modèle 3D + fichier CAO) se supprime avec ses fichiers et miniatures."""
+    A = client.module
+    p = client.post("/api/projets", json={"nom": "SupportCasque"}).json()
+    f1 = deposer(client, p["id"], "Support.3MF", cube_3mf(vignette=png_uni()))
+    f2 = deposer(client, p["id"], "Support.SLDPRT", b"pas un vrai SolidWorks")
+    imp = client.post("/api/impressions", json={"fichier_id": f1["id"], "resultat": "prevue"}).json()
+    disque = [A.FICHIERS / f["chemin"] for f in (f1, f2)]
+    assert all(c.exists() for c in disque) and (A.MINIATURES / f"{f1['id']}.png").exists()
+    assert client.delete(f"/api/projets/{p['id']}").json() == {"ok": True}
+    assert client.get(f"/api/projets/{p['id']}").status_code == 404
+    assert all(client.get(f"/api/fichiers/{f['id']}").status_code == 404 for f in (f1, f2))
+    assert not any(c.exists() for c in disque) and not (A.MINIATURES / f"{f1['id']}.png").exists()
+    assert client.get(f"/api/impressions/{imp['id']}").json()["fichier_id"] is None, "l'historique d'impression reste"
 
 
 def test_machine_bambu_incomplete(client):

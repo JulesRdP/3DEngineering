@@ -12,6 +12,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from . import reglages
 from .db import Base, maintenant
 from .machines import Parc
 from .mesh import ROLES, analyser, type_fichier
@@ -39,6 +40,19 @@ async def cycle(app):
 
 
 app = FastAPI(title="Atelier 3D", lifespan=cycle)
+
+
+@app.middleware("http")
+async def sans_cache_perime(requete, appel):
+    """Interface et miniatures : le navigateur revérifie à chaque fois (réponse 304 si rien n'a changé).
+    Sans cela, il gardait d'anciens modules JS après une mise à jour de l'appli, même après Ctrl+F5."""
+    reponse = await appel(requete)
+    chemin = requete.url.path
+    if chemin == "/" or chemin.startswith("/static/") or chemin.endswith("/miniature"):
+        reponse.headers["Cache-Control"] = "no-cache"
+    return reponse
+
+
 app.mount("/static", StaticFiles(directory=ICI / "static"), name="static")
 
 
@@ -280,6 +294,23 @@ def maj_reperes(ident: int, corps: dict):
     return propres
 
 
+CARTOUCHE = ["dessinateur", "verificateur", "date_verif", "matiere", "filament_id", "numero", "indice", "tolerance", "societe"]
+
+
+@app.put("/api/fichiers/{ident}/cartouche")
+def maj_cartouche(ident: int, corps: dict):
+    """Champs du cartouche du plan (texte court) ; la masse se déduit du filament choisi."""
+    f = _existe("fichiers", ident)
+    propres = {k: str(corps[k])[:80] for k in CARTOUCHE if corps.get(k) not in (None, "")}
+    if "filament_id" in propres:
+        fil = db.un("SELECT * FROM filaments WHERE id = ?", (int(propres["filament_id"]),))
+        if not fil:
+            raise HTTPException(400, "filament inconnu")
+        propres.setdefault("matiere", f"{fil['matiere']} {fil['marque']} {fil['couleur']}".strip())
+    db.modifier("fichiers", ident, {"meta": json.dumps({**f["meta"], "cartouche": propres})})
+    return propres
+
+
 @app.delete("/api/fichiers/{ident}")
 def suppr_fichier(ident: int):
     f = _existe("fichiers", ident)
@@ -379,7 +410,8 @@ def tableau():
         "taux_reussite": round(100 * len(reussies) / len(finies)) if finies else None,
         "grammes": round(grammes), "cout": round(cout, 2),
         "heures": round(sum((i["duree_min"] or 0) * 1 for i in finies) / 60, 1),
-        "stock_bas": db.tous("SELECT * FROM filaments WHERE stock_g < 200 ORDER BY stock_g"),
+        "stock_bas": db.tous("SELECT * FROM filaments WHERE stock_g < ? ORDER BY stock_g",
+                             (reglages.valeur(db, "general.filaments.stock_bas"),)),
         "a_imprimer": db.tous("""SELECT i.*, f.nom AS fichier_nom, m.nom AS machine_nom FROM impressions i
                                 LEFT JOIN fichiers f ON f.id = i.fichier_id LEFT JOIN machines m ON m.id = i.machine_id
                                 WHERE i.resultat IN ('prevue', 'en_cours') ORDER BY i.id"""),
@@ -387,6 +419,23 @@ def tableau():
                               LEFT JOIN fichiers f ON f.id = i.fichier_id LEFT JOIN machines m ON m.id = i.machine_id
                               WHERE i.resultat NOT IN ('prevue', 'en_cours') ORDER BY COALESCE(i.debut, '') DESC, i.id DESC LIMIT 8"""),
     }
+
+
+# ------------------------------------------------------------------ réglages
+
+@app.get("/api/reglages")
+def lire_reglages():
+    """La liste rangée des réglages (pour construire la page) et leurs valeurs actuelles."""
+    return {"sections": reglages.SECTIONS, "valeurs": reglages.toutes(db)}
+
+
+@app.put("/api/reglages")
+def maj_reglages(corps: dict):
+    """{clé: valeur} ; null remet la valeur par défaut. Tout est refusé si une valeur est invalide."""
+    try:
+        return {"valeurs": reglages.modifier(db, corps)}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @app.get("/api/sauvegarde")
